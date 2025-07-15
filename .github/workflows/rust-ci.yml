@@ -1,0 +1,73 @@
+# .github/workflows/rust-ci.yml
+
+name: Rust CI
+
+# Controls when the workflow will run
+on:
+  # Trigger the workflow on push and pull request events
+  push:
+    branches: [ main ] # Run on pushes to the main branch
+  pull_request:
+    branches: [ main ] # Run on pull requests targeting the main branch
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  build_and_test:
+    permissions:
+      contents: read # Allows checking out code and reading repository contents
+      security-events: write # Allows CodeQL to upload security scan results
+      pull-requests: write # Allows the workflow to interact with pull requests (e.g., status, comments)
+
+    # The type of runner that the job will run on
+    #runs-on: ubuntu-latest
+    # Use a matrix strategy to run jobs on multiple operating systems
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest] # Define the OS environments
+    runs-on: ${{ matrix.os }} # The type of runner that the job will run on, dynamically chosen from matrix
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4 # Action to check out your repository code
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable # Action to install a stable Rust toolchain
+      with:
+        toolchain: 1.88.0
+        components: rustfmt, clippy, rust-src # Install rustfmt and clippy for checks, rust-src for CodeQL analysis
+
+    - name: Cache Cargo dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
+
+    - name: Build project (verbose)
+      # Use --verbose for more detailed build output, useful for debugging CI issues
+      run: cargo build --verbose --workspace
+
+    - name: Run tests
+      # For SQLx tests, using an in-memory SQLite database is ideal for CI.
+      # Ensure your database.rs setup (establish_connection_pool)
+      # can handle "sqlite::memory:" as a DATABASE_URL.
+      env:
+        # Set DATABASE_URL for tests to use an in-memory SQLite database
+        DATABASE_URL: "sqlite::memory:"
+      run: cargo test --verbose --workspace
+
+    #- name: Check formatting
+    #  # Ensures code adheres to rustfmt standards
+    #  #run: cargo fmt --check
+
+    - name: Run Clippy (linting)
+      # Runs Clippy for common code quality and style checks
+      run: cargo clippy --workspace -- -D warnings # Treat all clippy warnings as errors

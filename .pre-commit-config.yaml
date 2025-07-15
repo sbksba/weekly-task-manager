@@ -1,0 +1,29 @@
+# .pre-commit-config.yml
+
+# It uses the pre-commit.com framework.
+
+# Configuration for pre-commit.com
+# See https://pre-commit.com/#usage for more details.
+repos:
+  # Rust-specific hooks
+  - repo: https://github.com/doublify/pre-commit-rust
+    rev: v1.0 # Use the latest stable version of this hook repository
+    hooks:
+      #- id: rustfmt # Runs `cargo fmt --check` on staged Rust files
+      #  args: [--workspace] # Apply to the whole workspace
+      - id: cargo-check # Runs `cargo check` on staged Rust files
+        args: [--workspace] # Apply to the whole workspace
+      - id: clippy # Runs `cargo clippy --workspace -- -D warnings` on staged Rust files
+        args: [--workspace, --,-D,warnings] # Apply to the whole workspace, treat warnings as errors
+
+  # General hooks (optional, but highly recommended)
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0 # Use the latest stable version
+    hooks:
+      - id: trailing-whitespace # Removes trailing whitespace
+      - id: end-of-file-fixer # Ensures files end with a newline
+      - id: check-yaml # Checks YAML file syntax (useful for .yml files)
+      - id: check-added-large-files # Prevents committing excessively large files
+        args: ['--maxkb=500'] # Max file size 500KB
+      - id: check-json # Checks JSON file syntax
+      - id: detect-private-key # Prevents committing private keys

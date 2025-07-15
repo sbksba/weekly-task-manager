@@ -1,0 +1,128 @@
+# .github/workflows/release.yml
+
+name: Release CI/CD
+
+# Configures this workflow to run every time a new tag (like v1.0.0) is pushed.
+on:
+  push:
+    tags:
+      - 'v*.*.*' # Trigger on pushes to tags like v1.0.0, v1.0.1, etc.
+
+# Defines custom environment variables for the workflow, making it more readable and maintainable.
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }} # Automatically resolves to 'owner/repo-name' (e.g., sbksba/weekly-task-manager)
+
+jobs:
+  build_and_release:
+    runs-on: ubuntu-latest
+    # Sets the permissions granted to the `GITHUB_TOKEN` for the actions in this job.
+    # 'contents: write' is needed for creating GitHub Releases.
+    # 'packages: write' is needed for pushing Docker images to GitHub Container Registry.
+    # 'attestations: write' and 'id-token: write' are for generating artifact attestations (supply chain security).
+    permissions:
+      contents: write
+      packages: write
+      attestations: write
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4 # Uses the latest v4 of checkout action
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3 # Uses the latest v3 of buildx setup action
+
+      # Logs in to the GitHub Container Registry using the GITHUB_TOKEN.
+      # This token is automatically provided by GitHub Actions and has permissions
+      # based on the 'permissions' block defined above.
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3 # Uses the latest v3 of login action
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }} # The GitHub user or bot that triggered the workflow
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Extracts metadata (tags, labels) for the Docker image from the Git tag.
+      # The 'id' "meta" allows its outputs to be referenced in subsequent steps.
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v5 # Uses the latest v5 of metadata action
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}} # Uses the Git tag as the Docker image tag (e.g., v1.0.0)
+            type=semver,pattern={{major}} # Also tag with major version (e.g., v1)
+            type=semver,pattern={{major}}.{{minor}} # Also tag with major.minor (e.g., v1.0)
+            # The 'latest' tag is only applied if the push is to the default branch (e.g., 'main').
+            # This prevents release tags from also being tagged 'latest' unless specifically desired.
+            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+          labels: |
+            org.opencontainers.image.description=A Rust-powered backend for a weekly task management application.
+            org.opencontainers.image.licenses=MIT # OCI Image License Label
+
+      # Extracts release notes for the current version from CHANGELOG.md.
+      # This step uses 'awk' to find the relevant section based on the Git tag.
+      - name: Extract Release Notes from CHANGELOG.md
+        id: get_release_notes
+        run: |
+          TAG_NAME="${{ github.ref_name }}"
+          VERSION_NO_V=$(echo "$TAG_NAME" | sed 's/^v//')
+
+          RELEASE_BODY=$(awk -v version="$VERSION_NO_V" '
+            BEGIN { found_version = 0; }
+            /^## \[/{
+              if ($0 ~ "^## \\[" version "\\]") {
+                found_version = 1;
+                next; # Skip the version header itself
+              } else if (found_version == 1) {
+                # Found the next version header, so stop
+                exit;
+              }
+            }
+            found_version == 1 { print }
+          ' CHANGELOG.md)
+
+          if [ -z "$(echo "$RELEASE_BODY" | tr -d '[:space:]')" ]; then
+            echo "Warning: No specific release notes found for version ${VERSION_NO_V} in CHANGELOG.md. Using a generic message."
+            RELEASE_BODY="## Release ${{ github.ref }}\n\nNo specific release notes found in CHANGELOG.md for this version. Please see commit history for details."
+          fi
+
+          echo "release_body<<EOF" >> $GITHUB_OUTPUT
+          echo "$RELEASE_BODY" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+        shell: bash # Ensure bash is used for the shell commands
+
+      # Creates a GitHub Release for the pushed tag.
+      # IMPORTANT: 'draft: false' ensures the release is published immediately,
+      # which is crucial for the GITHUB_TOKEN to have full write permissions for packages.
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2 # Uses the latest v2 of release action
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          body: ${{ steps.get_release_notes.outputs.release_body }}
+          draft: false # Ensures the release is published, not a draft.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Builds the Docker image based on your Containerfile.backend and pushes it to GHCR.
+      # It uses the tags and labels generated by the 'meta' step.
+      - name: Build and push Docker image
+        id: push
+        uses: docker/build-push-action@v5 # Uses the latest v5 of build-push action
+        with:
+          context: . # Build context is the root of the repository
+          file: ./Container/Containerfile.backend # Path to your Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      # Generates an artifact attestation for the image, providing provenance for builds.
+      # This enhances supply chain security.
+      - name: Generate artifact attestation
+        uses: actions/attest-build-provenance@v1 # Uses the latest v1 of attest-build-provenance action
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME}}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
