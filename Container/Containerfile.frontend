@@ -1,0 +1,15 @@
+# Uses a lightweight Nginx image as a web server for static files
+FROM nginx:alpine
+
+# Copy all your frontend files (HTML, CSS, JS) into Nginx's default web page directory.
+# Since the build context for this Containerfile will be './javascript-client' (as defined
+# in podman-compose.yaml), we can just copy '.'
+COPY . /usr/share/nginx/html
+
+# Expose port 80, which is Nginx's default HTTP port
+EXPOSE 80
+
+# Command to start Nginx when the container is launched
+# The "-g 'daemon off;'" flag ensures Nginx stays in the foreground,
+# which is necessary for the container to keep running.
+CMD ["nginx", "-g", "daemon off;"]

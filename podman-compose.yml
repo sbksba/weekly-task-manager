@@ -1,0 +1,61 @@
+# Specifies the Compose file format version
+version: '3.8'
+
+# Defines the services (your containers)
+services:
+  # Service for the Rust backend
+  backend:
+    # Instructs Podman to build the image using the Containerfile
+    # located in the './Container' directory relative to this compose file.
+    build:
+      context: . # The build context is the root of your project (calendar-app/)
+      dockerfile: Container/Containerfile.backend # Path to the backend Containerfile
+    # Maps container port 3000 to host port 3000.
+    # This allows accessing the backend from outside the container.
+    ports:
+      - "3000:3000"
+    # Mounts a named volume for persisting SQLite database data
+    # and the client_colors.json file.
+    # The host path './database' maps to '/app/database' inside the container.
+    volumes:
+      - ./database:/app/database:z # Explicitly map host's ./database to container's /app/database
+    # Connects this service to the shared 'app_network'.
+    networks:
+      - app_network
+    environment:
+      # --- PRODUCTION SETTING ---
+      # In production, replace "http://localhost:8080" with the actual public URL
+      # of your frontend application, e.g., "https://your-frontend.com"
+      #- CORS_ORIGIN=http://localhost:8080 # For local testing
+      # --- NEW: Default logging level for the backend ---
+      - RUST_LOG=info # Set default log level to INFO
+
+  # Service for the JavaScript frontend
+  frontend:
+    # Instructs Podman to build the image using the Containerfile
+    # located in the './Container' directory relative to this compose file.
+    build:
+      context: ./javascript-client # The build context is the javascript-client directory
+      dockerfile: ../Container/Containerfile.frontend # Path to the frontend Containerfile relative to context
+    # Maps container port 80 (Nginx) to host port 8080.
+    # You will access the frontend via http://localhost:8080.
+    ports:
+      - "8080:80"
+    # Specifies that the 'frontend' service depends on the 'backend' service.
+    # This ensures the backend starts before the frontend.
+    depends_on:
+      - backend
+    # Connects this service to the shared 'app_network'.
+    networks:
+      - app_network
+
+# Defines named volumes used by the services
+# Note: Since we are explicitly mapping a host directory (./database),
+#       we don't need a named volume declaration for backend_data here.
+#       The volume will be a bind mount.
+# volumes:
+#   backend_data: # This is commented out as we are using a bind mount now.
+
+# Defines a custom network for communication between services
+networks:
+  app_network: # Declares the named network 'app_network'

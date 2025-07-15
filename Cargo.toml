@@ -1,0 +1,23 @@
+[workspace]
+members = [
+    "common",
+    "server",
+]
+
+# Use a specific resolver to avoid feature unification issues between crates.
+resolver = "2"
+
+[workspace.dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+axum = "0.8.4"
+tokio = { version = "1.0", features = ["full"] }
+tower-http = { version = "0.6.6", features = ["cors", "trace"] }
+chrono = { version = "0.4", features = ["serde"] }
+sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "sqlite", "chrono", "macros"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow = "1.0"
+gloo-timers = { version = "0.3.0", features = ["futures"] }
+lazy_static = "1.4" # For a global mutable map
+parking_lot = "0.12" # For a faster RwLock

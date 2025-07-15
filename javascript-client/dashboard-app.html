@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Weekly Task Dashboard</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #e9eff5; /* Light background */
+            color: #333;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        .container {
+            background-color: #fff;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 6px 25px rgba(0, 0, 0, 0.15);
+            max-width: 1500px; /* Slightly wider for more content */
+            width: 100%;
+            margin-bottom: 25px;
+            box-sizing: border-box; /* Include padding in width */
+        }
+
+        h1, h2 {
+            text-align: center;
+            color: #2c3e50; /* Darker blue-grey for headings */
+            margin-bottom: 25px;
+            font-size: 2em;
+            font-weight: 600;
+        }
+
+        /* --- Legend Styles --- */
+        .legend {
+            margin-bottom: 35px;
+            padding: 20px;
+            background-color: #e0f2f7; /* Light blue background for legend */
+            border-left: 6px solid #3498db; /* Professional blue border */
+            border-radius: 8px;
+            text-align: left;
+        }
+
+        .legend h2 {
+            margin-top: 0;
+            color: #2c3e50;
+            font-size: 1.6em;
+            margin-bottom: 15px;
+            text-align: left;
+        }
+
+        .legend-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); /* Wider columns for legend */
+            gap: 15px;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            font-size: 1.0em;
+        }
+
+        .legend-color-box {
+            width: 28px; /* Larger color box */
+            height: 28px;
+            border-radius: 6px;
+            margin-right: 12px;
+            border: 1px solid rgba(0, 0, 0, 0.15);
+            flex-shrink: 0;
+        }
+
+        /* --- Calendar Table Styles --- */
+        .calendar-table {
+            overflow-x: auto;
+            width: 100%;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 25px;
+            min-width: 900px; /* Ensures table doesn't get too narrow on small screens */
+        }
+
+        th, td {
+            padding: 15px 12px;
+            border: 1px solid #e0e0e0;
+            text-align: left;
+            vertical-align: top;
+            min-width: 170px; /* Increased min-width for better task display */
+        }
+
+        th {
+            background-color: #5cb85c; /* A fresh green */
+            color: white;
+            text-transform: uppercase;
+            font-size: 1.05em;
+            letter-spacing: 0.05em;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        th span {
+            font-size: 0.85em;
+            display: block;
+            margin-top: 5px;
+            opacity: 0.9;
+        }
+
+        tr:nth-child(even) {
+            background-color: #f6f6f6;
+        }
+
+        tr:hover {
+            background-color: #eef7ee;
+        }
+
+        /* Task item within cells */
+        .task-item {
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 10px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            font-size: 0.95em;
+            position: relative;
+            word-wrap: break-word;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .task-item:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+        }
+
+        .task-item strong {
+            display: block;
+            margin-bottom: 6px;
+            font-size: 1.1em;
+            font-weight: 600;
+        }
+
+        .task-description {
+            font-weight: normal;
+            font-size: 0.9em;
+            color: inherit;
+            margin-bottom: 8px;
+        }
+
+        .task-delete-btn {
+            background-color: #dc3545;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            padding: 7px 14px;
+            font-size: 0.8em;
+            cursor: pointer;
+            margin-top: 8px;
+            width: 100%;
+            box-sizing: border-box;
+            transition: background-color 0.2s ease;
+        }
+        .task-delete-btn:hover {
+            background-color: #c82333;
+        }
+
+        .no-tasks {
+            color: #888;
+            font-style: italic;
+            text-align: center;
+            padding: 15px 0;
+            font-size: 0.9em;
+            background-color: #fdfdfd;
+            border-radius: 5px;
+        }
+
+        /* Utility classes for text color based on background */
+        .text-dark { color: #212529 !important; } /* Darker text */
+        .text-light { color: #f8f9fa !important; } /* Lighter text */
+
+        #current-week-display {
+            font-weight: bold;
+            margin-bottom: 25px;
+            text-align: center;
+            padding: 15px;
+            background-color: #d1ecf1; /* Info blue */
+            border-radius: 8px;
+            color: #0c5460;
+            font-size: 1.15em;
+            border: 1px solid #bee5eb;
+        }
+
+	  /* --- Media Queries pour le Responsive Design --- */
+
+    /* Pour les écrans de taille moyenne (ex: tablettes en portrait, petits ordinateurs portables) */
+    @media (max-width: 1024px) {
+        .container {
+            padding: 25px;
+            max-width: 95%; /* Prend un peu plus de largeur sur des écrans plus petits */
+        }
+        h1 {
+            font-size: 1.8em;
+        }
+        .legend h2 {
+            font-size: 1.4em;
+        }
+        .legend-grid {
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); /* Moins de colonnes ou plus petites */
+        }
+        th, td {
+            padding: 12px 8px; /* Moins de padding */
+            min-width: 150px; /* Réduire un peu la largeur minimale des colonnes */
+        }
+    }
+
+    /* Pour les très petits écrans (ex: mobiles) */
+    @media (max-width: 768px) {
+        body {
+            padding: 10px;
+        }
+        .container {
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            font-size: 1.5em;
+            margin-bottom: 20px;
+        }
+        .global-actions button {
+            width: 100%; /* Bouton prend toute la largeur */
+            margin-bottom: 10px;
+        }
+        .legend {
+            padding: 15px;
+            border-left-width: 4px;
+        }
+        .legend h2 {
+            font-size: 1.3em;
+        }
+        .legend-grid {
+            grid-template-columns: 1fr; /* Une seule colonne pour la légende sur mobile */
+            gap: 10px;
+        }
+        .legend-color-box {
+            width: 20px;
+            height: 20px;
+            border-radius: 4px;
+            margin-right: 8px;
+        }
+        .calendar-table {
+            /* overflow-x: auto; est déjà là et gère bien le tableau */
+        }
+        th, td {
+            font-size: 0.9em;
+            padding: 10px 6px;
+            min-width: 120px; /* Peut-être encore plus petit si nécessaire */
+        }
+        .task-item {
+            padding: 8px;
+            font-size: 0.85em;
+            margin-bottom: 8px;
+        }
+        .task-item strong {
+            font-size: 1em;
+        }
+        .task-delete-btn {
+            padding: 5px 10px;
+            font-size: 0.75em;
+        }
+        .no-tasks {
+            font-size: 0.8em;
+            padding: 10px 0;
+        }
+        #current-week-display {
+            font-size: 1em;
+            padding: 10px;
+        }
+    }
+
+    /* Pour les très, très petits écrans si vous voulez affiner (moins courant) */
+    @media (max-width: 480px) {
+        th, td {
+            min-width: 100px;
+            padding: 8px 4px;
+        }
+    }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Weekly Task Dashboard</h1>
+
+        <div id="current-week-display">Loading week dates...</div>
+
+        <div class="legend" id="color-legend">
+            <h2>Client Colors</h2>
+            <div class="legend-grid">
+                </div>
+        </div>
+
+        <div class="calendar-table">
+            <table>
+                <thead>
+                    <tr id="days-header">
+                        </tr>
+                </thead>
+                <tbody id="tasks-body">
+                    </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        //const API_BASE_URL = 'http://127.0.0.1:3000/api';
+        const API_BASE_URL = `http://${window.location.hostname}:3000/api`;
+        const TASKS_REFRESH_INTERVAL_MS = 15 * 1000; // Refresh every 15 seconds
+
+        const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+        // Utility function to get Monday of the current week (ISO week-date standard)
+        function getMondayOfCurrentWeek() {
+            const today = new Date();
+            const dayOfWeek = (today.getDay() + 6) % 7; // Convert to 0=Mon, 6=Sun
+            const monday = new Date(today);
+            monday.setDate(today.getDate() - dayOfWeek);
+            monday.setHours(0, 0, 0, 0); // Reset time to start of day
+            return monday;
+        }
+
+        // Utility function to format a Date object to YYYY-MM-DD string
+        function formatDate(date) {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        }
+
+        // Utility function to determine text color (black/white) based on background color for contrast
+        function getContrastYIQ(hexcolor) {
+            if (!hexcolor || hexcolor.length !== 7) return 'text-dark'; // Default to dark text
+            const r = parseInt(hexcolor.substr(1, 2), 16);
+            const g = parseInt(hexcolor.substr(3, 2), 16);
+            const b = parseInt(hexcolor.substr(5, 2), 16);
+            const yiq = ((r * 299) + (g * 587) + (b * 114)) / 1000;
+            return (yiq >= 140) ? 'text-dark' : 'text-light'; // Adjusted threshold for better contrast
+        }
+
+        // Utility function to slightly darken a color for borders/shadows
+        function darkenColor(hex, percent) {
+            if (!hex || hex.length !== 7) return hex;
+            const f=parseInt(hex.slice(1),16),t=percent<0?0:255,p=percent<0?percent*-1:percent,R=f>>16,G=(f>>8)&0x00FF,B=f&0x0000FF;
+            return "#"+(0x1000000+(Math.round((t-R)*p)+R)*0x10000+(Math.round((t-G)*p)+G)*0x100+(Math.round((t-B)*p)+B)).toString(16).slice(1);
+        }
+
+
+        // Displays the current week range
+        function displayCurrentWeekRange() {
+            const monday = getMondayOfCurrentWeek();
+            const sunday = new Date(monday);
+            sunday.setDate(monday.getDate() + 6);
+            document.getElementById('current-week-display').textContent =
+                `Tasks for the week : ${formatDate(monday)} to ${formatDate(sunday)}`;
+        }
+
+        // Fetches tasks from the backend API
+        async function fetchTasks() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/tasks`);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const tasks = await response.json();
+                renderCalendar(tasks); // Render tasks into the calendar table
+                displayCurrentWeekRange();
+            } catch (error) {
+                console.error("Failed to fetch tasks for dashboard:", error);
+                document.getElementById('tasks-body').innerHTML = `<tr><td colspan="7" style="text-align: center; color: red; padding: 20px;">Failed to load tasks. Please ensure the server is running and accessible.</td></tr>`;
+                document.getElementById('color-legend').querySelector('.legend-grid').innerHTML = '<p style="color: red; text-align: center;">Legend not available.</p>';
+            }
+        }
+
+        // Renders tasks into the calendar table
+        function renderCalendar(tasks) {
+            const daysHeader = document.getElementById('days-header');
+            const tasksBody = document.getElementById('tasks-body');
+            const colorLegendGrid = document.getElementById('color-legend').querySelector('.legend-grid');
+
+            // Clear previous content
+            daysHeader.innerHTML = '';
+            tasksBody.innerHTML = '';
+            colorLegendGrid.innerHTML = '';
+
+            const monday = getMondayOfCurrentWeek();
+            const weekDates = [];
+            const taskCells = {}; // Stores references to <td> elements for each day
+
+            // Create table headers (day names and dates)
+            dayNames.forEach((name, index) => {
+                const currentDate = new Date(monday);
+                currentDate.setDate(monday.getDate() + index);
+                const formattedDate = formatDate(currentDate);
+                weekDates.push(formattedDate);
+
+                const th = document.createElement('th');
+                th.innerHTML = `${name} <span>(${currentDate.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })})</span>`;
+                daysHeader.appendChild(th);
+            });
+
+            // Create the single row for tasks
+            const tasksRow = document.createElement('tr');
+            tasksBody.appendChild(tasksRow);
+
+            // Create a cell for each day of the week
+            weekDates.forEach(date => {
+                const td = document.createElement('td');
+                td.id = `tasks-for-${date}`; // Unique ID for each day's cell
+                tasksRow.appendChild(td);
+                taskCells[date] = td; // Store reference
+            });
+
+            const clientsColors = new Map(); // To collect client names and their colors for the legend
+
+            // Populate task cells
+            weekDates.forEach(date => {
+                const dayTasks = tasks.filter(task => {
+                    // Normalize task_date to YYYY-MM-DD (remove time part if any)
+                    const taskDate = task.task_date ? task.task_date.split('T')[0] : null;
+                    return taskDate === date && task.deleted_at === null; // Only non-deleted tasks
+                });
+
+                const cell = taskCells[date];
+                if (cell) {
+                    if (dayTasks.length > 0) {
+                        dayTasks.forEach(task => {
+                            const taskDiv = document.createElement('div');
+                            taskDiv.classList.add('task-item');
+                            // Ensure client_color exists before using it
+                            const taskColor = task.client_color || '#CCCCCC'; // Fallback color
+                            taskDiv.style.backgroundColor = taskColor;
+                            taskDiv.classList.add(getContrastYIQ(taskColor)); // Apply text color class
+                            taskDiv.style.border = `1px solid ${darkenColor(taskColor, -15)}`; // Darker border for depth
+
+                            taskDiv.innerHTML = `
+                                <strong>${task.client_name}</strong>
+                                <div class="task-description">${task.description}</div>
+                                <button class="task-delete-btn" data-id="${task.id}">Delete</button>
+                            `;
+                            cell.appendChild(taskDiv);
+
+                            // Add client to the map for the legend
+                            clientsColors.set(task.client_name, taskColor);
+                        });
+                    } else {
+                        const noTasksDiv = document.createElement('div');
+                        noTasksDiv.classList.add('no-tasks');
+                        noTasksDiv.textContent = 'No Task';
+                        cell.appendChild(noTasksDiv);
+                    }
+                }
+            });
+
+            // Generate color legend
+            if (clientsColors.size > 0) {
+                // Sort legend by client name for consistency
+                const sortedClients = Array.from(clientsColors.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+                sortedClients.forEach(([name, color]) => {
+                    const legendItem = document.createElement('div');
+                    legendItem.classList.add('legend-item');
+
+                    const colorBox = document.createElement('div');
+                    colorBox.classList.add('legend-color-box');
+                    colorBox.style.backgroundColor = color;
+
+                    const clientName = document.createElement('span');
+                    clientName.textContent = name;
+
+                    legendItem.appendChild(colorBox);
+                    legendItem.appendChild(clientName);
+                    colorLegendGrid.appendChild(legendItem);
+                });
+            } else {
+                colorLegendGrid.innerHTML = '<p class="no-tasks" style="border: none; background: none;">No clients with tasks for this week.</p>';
+            }
+
+            // Attach delete event listeners to the new buttons
+            tasksBody.querySelectorAll('.task-delete-btn').forEach(button => {
+                button.addEventListener('click', async (event) => {
+                    const taskId = event.target.dataset.id;
+                    await deleteTask(taskId);
+                });
+            });
+        }
+
+        // Function to handle task deletion
+        async function deleteTask(taskId) {
+            if (!confirm(`Are you sure you want to delete task ID ${taskId} ?`)) {
+                return;
+            }
+            try {
+                const response = await fetch(`${API_BASE_URL}/tasks/${taskId}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.status === 204) {
+                    console.log(`Task ID ${taskId} deleted successfully!`);
+                    fetchTasks(); // Refresh dashboard immediately
+                } else if (response.status === 404) {
+                    console.warn(`Task ID ${taskId} not found or already deleted.`);
+                    alert(`Task ID ${taskId} not found or already deleted.`);
+                } else {
+                    const errorData = await response.json();
+                    console.error(`Failed to delete task ${taskId}:`, response.status, errorData.error || response.statusText);
+                    alert(`Failed to delete task ${taskId}: ${errorData.error || 'Unknown error'}`);
+                }
+            } catch (error) {
+                console.error("Request failed:", error);
+                alert("Network error or server unavailable.");
+            }
+        }
+
+        // Initial fetch when the page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            fetchTasks();
+            setInterval(fetchTasks, TASKS_REFRESH_INTERVAL_MS); // Set up automatic refresh
+        });
+    </script>
+</body>
+</html>
