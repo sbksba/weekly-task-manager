@@ -1,0 +1,29 @@
+[package]
+name = "server"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+axum = { workspace = true }
+tokio = { workspace = true }
+tower-http = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sqlx = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+lazy_static = { workspace = true }
+parking_lot = { workspace = true }
+
+common = { path = "../common" }
+
+[dev-dependencies]
+axum = { version = "0.8.4", features = ["macros"] }
+bytes = "1"
+http-body-util = "0.1"
+serde_json = "1.0" # This can stay as 1.0 or { workspace = true } if it's in workspace
+tempfile = "3.10.1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "fs"] }
+tower = { version = "0.4", features = ["full"] }

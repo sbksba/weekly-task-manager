@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Task Manager</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f0f2f5; /* Light grey background */
+            color: #333;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 800px;
+            width: 100%;
+            margin: 20px auto;
+            background-color: #ffffff;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+        }
+        h1, h2 {
+            color: #2c3e50; /* Dark blue-grey for headings */
+            margin-bottom: 25px;
+            text-align: center;
+            font-weight: 600;
+        }
+        form div {
+            margin-bottom: 18px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+            color: #555;
+            font-size: 0.95em;
+        }
+        input[type="text"], input[type="date"] {
+            width: calc(100% - 22px); /* Adjust for padding and border */
+            padding: 12px;
+            border: 1px solid #ced4da;
+            border-radius: 6px;
+            box-sizing: border-box;
+            font-size: 1em;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+        input[type="text"]:focus, input[type="date"]:focus {
+            border-color: #007bff;
+            box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.25);
+            outline: none;
+        }
+        button {
+            padding: 12px 25px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 1.05em;
+            font-weight: 500;
+            transition: background-color 0.2s ease, transform 0.1s ease;
+            display: inline-block;
+            margin-right: 10px; /* Space between buttons */
+        }
+        button:hover {
+            background-color: #0056b3;
+            transform: translateY(-1px);
+        }
+        button:active {
+            transform: translateY(0);
+        }
+        .rollover-btn {
+            background-color: #28a745; /* Green for rollover */
+        }
+        .rollover-btn:hover {
+            background-color: #218838;
+        }
+        .logout-btn {
+            background-color: #6c757d; /* Grey for logout */
+            margin-left: auto; /* Pushes button to the right */
+        }
+        .logout-btn:hover {
+            background-color: #5a6268;
+        }
+
+        ul {
+            list-style: none;
+            padding: 0;
+            margin-top: 20px;
+        }
+        li {
+            background-color: #e9f0f6; /* Lighter background for list items */
+            border: 1px solid #dcdfe4;
+            margin-bottom: 12px;
+            padding: 15px 20px;
+            border-radius: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            transition: background-color 0.2s ease, box-shadow 0.2s ease;
+        }
+        li:hover {
+            background-color: #e0e7ed;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+        li div {
+            flex-grow: 1;
+            margin-right: 15px;
+            min-width: 200px; /* Ensure content doesn't get too cramped */
+        }
+        li strong {
+            color: #0056b3;
+            font-size: 1.1em;
+            display: block;
+            margin-bottom: 5px;
+        }
+        li .task-description {
+            font-size: 0.95em;
+            color: #495057;
+            margin-bottom: 5px;
+        }
+        li .task-info {
+            font-size: 0.8em;
+            color: #6c757d;
+        }
+        li .delete-btn {
+            background-color: #dc3545;
+            padding: 8px 15px;
+            font-size: 0.85em;
+            flex-shrink: 0;
+            margin-top: 5px; /* Adjust for wrapping if necessary */
+        }
+        li .delete-btn:hover {
+            background-color: #c82333;
+        }
+        .info-message, .error-message {
+            text-align: center;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 20px;
+            font-size: 0.95em;
+        }
+        .info-message {
+            background-color: #e2e3e5;
+            border: 1px solid #d6d8db;
+            color: #495057;
+        }
+        .error-message {
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+
+        /* Styles for the name selection screen */
+        #name-selection-screen {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            text-align: center;
+        }
+        #name-selection-screen .container {
+            max-width: 500px;
+            padding: 40px;
+        }
+        #name-selection-screen input {
+            margin-bottom: 20px;
+        }
+        #name-selection-screen button {
+            width: 100%;
+        }
+
+        /* Hide the task manager app initially */
+        #task-manager-app {
+            display: none;
+        }
+
+        .header-controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #eee;
+        }
+        .current-user-display {
+            font-size: 1.1em;
+            font-weight: bold;
+            color: #0056b3;
+        }
+
+
+        @media (max-width: 600px) {
+            .container {
+                padding: 20px;
+            }
+            li {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            li div {
+                margin-right: 0;
+                margin-bottom: 10px;
+                width: 100%;
+            }
+            button {
+                width: 100%;
+                margin-right: 0;
+                margin-bottom: 10px;
+            }
+            .header-controls {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            .current-user-display {
+                margin-bottom: 10px;
+            }
+            .logout-btn {
+                margin-left: 0;
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Name selection screen -->
+    <div id="name-selection-screen" class="container">
+        <h1>Welcome!</h1>
+        <p>Please enter your name to start managing your tasks.</p>
+        <div>
+            <label for="user_name_input">Your Name:</label>
+            <input type="text" id="user_name_input" placeholder="Ex: Alice" required>
+        </div>
+        <button id="start-app-btn">Start</button>
+    </div>
+
+    <!-- Task management application (initially hidden) -->
+    <div id="task-manager-app" class="container">
+        <div class="header-controls">
+            <h1 class="current-user-display"></h1>
+            <button id="logout-btn" class="logout-btn">Change User</button>
+        </div>
+
+        <h2>Create New Task</h2>
+        <form id="create-task-form">
+            <div>
+                <label for="description">Task Description:</label>
+                <input type="text" id="description" placeholder="Ex: Prepare presentation" required>
+            </div>
+            <div>
+                <label for="task_date">Task Date (YYYY-MM-DD, optional):</label>
+                <input type="date" id="task_date">
+            </div>
+            <button type="submit">Add Task</button>
+            <button type="button" id="rollover-btn" class="rollover-btn">Rollover Today's Tasks</button>
+        </form>
+
+        <h2>My Tasks for the Week</h2>
+        <div id="tasks-list">
+            <p class="info-message">Loading your tasks...</p>
+        </div>
+    </div>
+
+    <script>
+        //const API_BASE_URL = 'http://127.0.0.1:3000/api';
+        const API_BASE_URL = `http://${window.location.hostname}:3000/api`;
+        const TASKS_REFRESH_INTERVAL_MS = 15 * 1000; // Refresh every 15 seconds
+        const CLIENT_NAME_STORAGE_KEY = 'currentClientName';
+
+        let currentClientName = null; // Variable to store the current user's name
+
+        // References to DOM elements
+        const nameSelectionScreen = document.getElementById('name-selection-screen');
+        const taskManagerApp = document.getElementById('task-manager-app');
+        const userNameInput = document.getElementById('user_name_input');
+        const startAppBtn = document.getElementById('start-app-btn');
+        const currentUserDisplay = document.querySelector('.current-user-display');
+        const logoutBtn = document.getElementById('logout-btn');
+        const createTaskForm = document.getElementById('create-task-form');
+        const descriptionInput = document.getElementById('description');
+        const taskDateInput = document.getElementById('task_date');
+        const rolloverBtn = document.getElementById('rollover-btn');
+        const tasksListDiv = document.getElementById('tasks-list');
+
+        // --- Utility Functions ---
+        async function fetchAndRenderTasks() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/tasks`);
+                if (!response.ok) {
+                    throw new Error(`HTTP Error: ${response.status}`);
+                }
+                const allTasks = await response.json();
+                // Filter tasks for the current user
+                const myTasks = allTasks.filter(task =>
+                    task.client_name === currentClientName && task.deleted_at === null
+                );
+                renderTasksList(myTasks);
+            } catch (error) {
+                console.error("Failed to load tasks:", error);
+                tasksListDiv.innerHTML = '<p class="error-message">Failed to load your tasks. Please ensure the server is running and accessible.</p>';
+            }
+        }
+
+        function renderTasksList(tasks) {
+            tasksListDiv.innerHTML = ''; // Clear previous content
+
+            if (tasks.length === 0) {
+                tasksListDiv.innerHTML = '<p class="info-message">No tasks found for you this week. Add one above!</p>';
+                return;
+            }
+
+            const ul = document.createElement('ul');
+            // Sort tasks by creation date (newest first)
+            tasks.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+            tasks.forEach(task => {
+                const li = document.createElement('li');
+                li.style.borderLeft = `5px solid ${task.client_color}`;
+                li.innerHTML = `
+                    <div>
+                        <strong>${task.description}</strong><br>
+                        <span class="task-info">Date: ${task.task_date} | ID: ${task.id} | Created: ${new Date(task.created_at).toLocaleString()}</span>
+                    </div>
+                    <button class="delete-btn" data-id="${task.id}">Delete</button>
+                `;
+                ul.appendChild(li);
+            });
+            tasksListDiv.appendChild(ul);
+
+            // Attach delete event listeners
+            ul.querySelectorAll('.delete-btn').forEach(button => {
+                button.addEventListener('click', async (event) => {
+                    const taskId = event.target.dataset.id;
+                    await deleteTask(taskId);
+                });
+            });
+        }
+
+        async function createTask(description, taskDate) {
+            const payload = {
+                client_name: currentClientName, // Uses the current user's name
+                description: description,
+                task_date: taskDate || null // Send null if date is not provided
+            };
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/tasks`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (response.status === 201) {
+                    console.log("Task created successfully!");
+                    createTaskForm.reset(); // Reset the form
+                    fetchAndRenderTasks(); // Refresh the list immediately
+                } else {
+                    const errorData = await response.json();
+                    console.error("Failed to create task:", response.status, errorData.error || response.statusText);
+                    alert(`Failed to create task: ${errorData.error || 'Unknown error'}`);
+                }
+            } catch (error) {
+                console.error("Request failed:", error);
+                alert("Network error or server unavailable.");
+            }
+        }
+
+        async function deleteTask(taskId) {
+            if (!confirm(`Are you sure you want to delete task ID ${taskId}? This action is irreversible.`)) {
+                return;
+            }
+            try {
+                const response = await fetch(`${API_BASE_URL}/tasks/${taskId}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.status === 204) {
+                    console.log(`Task ID ${taskId} deleted successfully!`);
+                    fetchAndRenderTasks(); // Refresh the list immediately
+                } else if (response.status === 404) {
+                    console.warn(`Task ID ${taskId} not found or already deleted.`);
+                    alert(`Task ID ${taskId} not found or already deleted.`);
+                } else {
+                    const errorData = await response.json();
+                    console.error(`Failed to delete task ${taskId}:`, response.status, errorData.error || response.statusText);
+                    alert(`Failed to delete task ${taskId}: ${errorData.error || 'Unknown error'}`);
+                }
+            } catch (error) {
+                console.error("Request failed:", error);
+                alert("Network error or server unavailable.");
+            }
+        }
+
+        async function rolloverTasks() {
+            if (!confirm('Are you sure you want to roll over all incomplete tasks from today to tomorrow?')) {
+                return;
+            }
+            try {
+                const response = await fetch(`${API_BASE_URL}/tasks/rollover`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    alert(data.message || 'Tasks rolled over successfully!');
+                    fetchAndRenderTasks(); // Refresh the list immediately
+                } else {
+                    const errorData = await response.json();
+                    console.error("Failed to roll over tasks:", response.status, errorData.error || response.statusText);
+                    alert(`Failed to roll over tasks: ${errorData.error || 'Unknown error'}`);
+                }
+            } catch (error) {
+                console.error("Rollover request failed:", error);
+                alert("Network error or server unavailable for rollover.");
+            }
+        }
+
+        // --- Application State Management (name selection) ---
+        function showNameSelectionScreen() {
+            nameSelectionScreen.style.display = 'flex';
+            taskManagerApp.style.display = 'none';
+            userNameInput.value = ''; // Reset the input field
+            currentClientName = null;
+            localStorage.removeItem(CLIENT_NAME_STORAGE_KEY);
+        }
+
+        function showTaskManagerApp(userName) {
+            currentClientName = userName;
+            localStorage.setItem(CLIENT_NAME_STORAGE_KEY, userName);
+            currentUserDisplay.textContent = `Hello, ${userName}!`;
+            nameSelectionScreen.style.display = 'none';
+            taskManagerApp.style.display = 'block';
+            fetchAndRenderTasks(); // Load user's tasks
+        }
+
+        // --- Event Listeners ---
+        startAppBtn.addEventListener('click', () => {
+            const userName = userNameInput.value.trim();
+            if (userName) {
+                showTaskManagerApp(userName);
+            } else {
+                alert("Please enter your name to continue.");
+            }
+        });
+
+        createTaskForm.addEventListener('submit', (event) => {
+            event.preventDefault();
+            const description = descriptionInput.value.trim();
+            const taskDate = taskDateInput.value;
+
+            if (!description) {
+                alert("Task description cannot be empty.");
+                return;
+            }
+            createTask(description, taskDate);
+        });
+
+        rolloverBtn.addEventListener('click', rolloverTasks);
+        logoutBtn.addEventListener('click', showNameSelectionScreen);
+
+        // --- Application Initialization ---
+        document.addEventListener('DOMContentLoaded', () => {
+            const storedClientName = localStorage.getItem(CLIENT_NAME_STORAGE_KEY);
+            if (storedClientName) {
+                showTaskManagerApp(storedClientName);
+            } else {
+                showNameSelectionScreen();
+            }
+	    setInterval(fetchAndRenderTasks, TASKS_REFRESH_INTERVAL_MS); // Set up automatic refresh
+        });
+    </script>
+</body>
+</html>
