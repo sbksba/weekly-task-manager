@@ -38,6 +38,9 @@ pub struct Task {
 
     #[sqlx(rename = "deleted_at")]
     pub deleted_at: Option<DateTime<Utc>>,
+
+    #[sqlx(rename = "priority")]
+    pub priority: Option<i32>, // (e.g., 1 = high, lower number = higher priority)
 }
 
 /// Structure used to receive task creation data from the API.
@@ -51,6 +54,7 @@ pub struct CreateTaskPayload {
     // The day is optional. If not provided,
     // we'll use the current day on the server-side.
     pub task_date: Option<NaiveDate>,
+    pub priority: Option<i32>,
 }
 
 /// Represents a client and their associated color.

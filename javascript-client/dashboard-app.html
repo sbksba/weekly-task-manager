@@ -195,7 +195,7 @@
             border: 1px solid #bee5eb;
         }
 
-	  /* --- Media Queries pour le Responsive Design --- */
+      /* --- Media Queries pour le Responsive Design --- */
 
     /* Pour les écrans de taille moyenne (ex: tablettes en portrait, petits ordinateurs portables) */
     @media (max-width: 1024px) {
@@ -421,85 +421,94 @@
                 const td = document.createElement('td');
                 td.id = `tasks-for-${date}`; // Unique ID for each day's cell
                 tasksRow.appendChild(td);
-                taskCells[date] = td; // Store reference
+                taskCells[date] = td; // Store reference to the cell
             });
 
-            const clientsColors = new Map(); // To collect client names and their colors for the legend
+            // Sort tasks by priority (lower number = higher priority), then by creation date
+            // This ensures tasks within a cell are displayed in priority order
+            tasks.sort((a, b) => {
+                if (a.priority === null && b.priority !== null) return 1;
+                if (a.priority !== null && b.priority === null) return -1;
+                if (a.priority !== null && b.priority !== null) return a.priority - b.priority;
+                return new Date(a.created_at) - new Date(b.created_at); // Fallback to creation date for stable sort
+            });
 
-            // Populate task cells
-            weekDates.forEach(date => {
-                const dayTasks = tasks.filter(task => {
-                    // Normalize task_date to YYYY-MM-DD (remove time part if any)
-                    const taskDate = task.task_date ? task.task_date.split('T')[0] : null;
-                    return taskDate === date && task.deleted_at === null; // Only non-deleted tasks
-                });
+            // Populate tasks into their respective day cells
+            const clientColorsUsed = new Set(); // To track unique client colors for the legend
 
-                const cell = taskCells[date];
-                if (cell) {
-                    if (dayTasks.length > 0) {
-                        dayTasks.forEach(task => {
-                            const taskDiv = document.createElement('div');
-                            taskDiv.classList.add('task-item');
-                            // Ensure client_color exists before using it
-                            const taskColor = task.client_color || '#CCCCCC'; // Fallback color
-                            taskDiv.style.backgroundColor = taskColor;
-                            taskDiv.classList.add(getContrastYIQ(taskColor)); // Apply text color class
-                            taskDiv.style.border = `1px solid ${darkenColor(taskColor, -15)}`; // Darker border for depth
+            tasks.forEach(task => {
+                // Ensure the task is active (not soft-deleted)
+                if (task.deleted_at !== null) {
+                    return; // Skip soft-deleted tasks for the dashboard view
+                }
 
-                            taskDiv.innerHTML = `
-                                <strong>${task.client_name}</strong>
-                                <div class="task-description">${task.description}</div>
-                                <button class="task-delete-btn" data-id="${task.id}">Delete</button>
-                            `;
-                            cell.appendChild(taskDiv);
+                const taskDate = task.task_date; // Assuming task.task_date is already in YYYY-MM-DD format
+                const targetCell = taskCells[taskDate];
 
-                            // Add client to the map for the legend
-                            clientsColors.set(task.client_name, taskColor);
-                        });
-                    } else {
-                        const noTasksDiv = document.createElement('div');
-                        noTasksDiv.classList.add('no-tasks');
-                        noTasksDiv.textContent = 'No Task';
-                        cell.appendChild(noTasksDiv);
-                    }
+                if (targetCell) {
+                    const taskItem = document.createElement('div');
+                    taskItem.className = 'task-item';
+                    taskItem.style.backgroundColor = task.client_color;
+                    const textColorClass = getContrastYIQ(task.client_color);
+                    taskItem.classList.add(textColorClass); // Apply text color class
+
+                    // Add a subtle border/shadow effect
+                    taskItem.style.border = `1px solid ${darkenColor(task.client_color, -10)}`; // Slightly darker border
+                    taskItem.style.boxShadow = `0 2px 6px ${darkenColor(task.client_color, -20)}50`; // Subtle shadow
+
+                    taskItem.innerHTML = `
+                        <strong>${task.client_name}</strong>
+                        <div class="task-description">
+                            ${task.description}
+                        </div>
+                        <button class="task-delete-btn" data-id="${task.id}">Delete</button>
+                    `;
+                    targetCell.appendChild(taskItem);
+
+                    // Add client color to the set for legend generation
+                    clientColorsUsed.add(JSON.stringify({ name: task.client_name, color: task.client_color }));
                 }
             });
 
-            // Generate color legend
-            if (clientsColors.size > 0) {
-                // Sort legend by client name for consistency
-                const sortedClients = Array.from(clientsColors.entries()).sort((a, b) => a[0].localeCompare(b[0]));
-                sortedClients.forEach(([name, color]) => {
+            // Render the color legend
+            if (clientColorsUsed.size === 0) {
+                colorLegendGrid.innerHTML = '<p class="no-tasks">No clients with active tasks this week.</p>';
+            } else {
+                // Sort legend items by client name
+                Array.from(clientColorsUsed).map(s => JSON.parse(s)).sort((a, b) => a.name.localeCompare(b.name)).forEach(clientData => {
                     const legendItem = document.createElement('div');
-                    legendItem.classList.add('legend-item');
-
-                    const colorBox = document.createElement('div');
-                    colorBox.classList.add('legend-color-box');
-                    colorBox.style.backgroundColor = color;
-
-                    const clientName = document.createElement('span');
-                    clientName.textContent = name;
-
-                    legendItem.appendChild(colorBox);
-                    legendItem.appendChild(clientName);
+                    legendItem.className = 'legend-item';
+                    legendItem.innerHTML = `
+                        <div class="legend-color-box" style="background-color: ${clientData.color};"></div>
+                        <span>${clientData.name}</span>
+                    `;
                     colorLegendGrid.appendChild(legendItem);
                 });
-            } else {
-                colorLegendGrid.innerHTML = '<p class="no-tasks" style="border: none; background: none;">No clients with tasks for this week.</p>';
             }
 
-            // Attach delete event listeners to the new buttons
+            // Attach delete event listeners to newly rendered buttons
             tasksBody.querySelectorAll('.task-delete-btn').forEach(button => {
                 button.addEventListener('click', async (event) => {
                     const taskId = event.target.dataset.id;
                     await deleteTask(taskId);
                 });
             });
+
+            // If a cell has no tasks, add a placeholder message
+            weekDates.forEach(date => {
+                const cell = taskCells[date];
+                if (cell.children.length === 0) {
+                    const noTasksDiv = document.createElement('div');
+                    noTasksDiv.className = 'no-tasks';
+                    noTasksDiv.textContent = 'No tasks';
+                    cell.appendChild(noTasksDiv);
+                }
+            });
         }
 
-        // Function to handle task deletion
+        // Handles deleting a task (re-using the logic from client-app)
         async function deleteTask(taskId) {
-            if (!confirm(`Are you sure you want to delete task ID ${taskId} ?`)) {
+            if (!confirm(`Are you sure you want to delete task ID ${taskId}? This action is irreversible.`)) {
                 return;
             }
             try {
@@ -509,7 +518,7 @@
 
                 if (response.status === 204) {
                     console.log(`Task ID ${taskId} deleted successfully!`);
-                    fetchTasks(); // Refresh dashboard immediately
+                    fetchTasks(); // Refresh the list immediately
                 } else if (response.status === 404) {
                     console.warn(`Task ID ${taskId} not found or already deleted.`);
                     alert(`Task ID ${taskId} not found or already deleted.`);
@@ -523,6 +532,7 @@
                 alert("Network error or server unavailable.");
             }
         }
+
 
         // Initial fetch when the page loads
         document.addEventListener('DOMContentLoaded', () => {

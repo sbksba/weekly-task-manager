@@ -41,7 +41,7 @@
             color: #555;
             font-size: 0.95em;
         }
-        input[type="text"], input[type="date"] {
+        input[type="text"], input[type="date"], input[type="number"] { /* Added input[type="number"] */
             width: calc(100% - 22px); /* Adjust for padding and border */
             padding: 12px;
             border: 1px solid #ced4da;
@@ -50,7 +50,7 @@
             font-size: 1em;
             transition: border-color 0.2s ease, box-shadow 0.2s ease;
         }
-        input[type="text"]:focus, input[type="date"]:focus {
+        input[type="text"]:focus, input[type="date"]:focus, input[type="number"]:focus { /* Added input[type="number"] */
             border-color: #007bff;
             box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.25);
             outline: none;
@@ -259,6 +259,10 @@
                 <label for="task_date">Task Date (YYYY-MM-DD, optional):</label>
                 <input type="date" id="task_date">
             </div>
+            <div>
+                <label for="priority">Priority (Optional, lower number = higher priority):</label>
+                <input type="number" id="priority" placeholder="Ex: 1 (High)" min="1">
+            </div>
             <button type="submit">Add Task</button>
             <button type="button" id="rollover-btn" class="rollover-btn">Rollover Today's Tasks</button>
         </form>
@@ -287,6 +291,7 @@
         const createTaskForm = document.getElementById('create-task-form');
         const descriptionInput = document.getElementById('description');
         const taskDateInput = document.getElementById('task_date');
+        const priorityInput = document.getElementById('priority');
         const rolloverBtn = document.getElementById('rollover-btn');
         const tasksListDiv = document.getElementById('tasks-list');
 
@@ -318,8 +323,20 @@
             }
 
             const ul = document.createElement('ul');
-            // Sort tasks by creation date (newest first)
-            tasks.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+            // Sort tasks by date, then by priority (lower number = higher priority), then by creation date
+            tasks.sort((a, b) => {
+                // Sort by task_date first
+                const dateComparison = new Date(a.task_date) - new Date(b.task_date);
+                if (dateComparison !== 0) return dateComparison;
+
+                // Then by priority (nulls last, lower number first)
+                if (a.priority === null && b.priority !== null) return 1;
+                if (a.priority !== null && b.priority === null) return -1;
+                if (a.priority !== null && b.priority !== null) return a.priority - b.priority;
+
+                // Finally by creation date (newest first) if dates and priorities are the same
+                return new Date(b.created_at) - new Date(a.created_at);
+            });
 
             tasks.forEach(task => {
                 const li = document.createElement('li');
@@ -327,7 +344,11 @@
                 li.innerHTML = `
                     <div>
                         <strong>${task.description}</strong><br>
-                        <span class="task-info">Date: ${task.task_date} | ID: ${task.id} | Created: ${new Date(task.created_at).toLocaleString()}</span>
+                        <span class="task-info">
+                            Date: ${task.task_date}
+                            ${task.priority !== null ? ` | Priority: ${task.priority}` : ''}
+                            | ID: ${task.id} | Created: ${new Date(task.created_at).toLocaleString()}
+                        </span>
                     </div>
                     <button class="delete-btn" data-id="${task.id}">Delete</button>
                 `;
@@ -345,10 +366,13 @@
         }
 
         async function createTask(description, taskDate) {
+            const priority = priorityInput.value ? parseInt(priorityInput.value, 10) : null; // NEW: Get priority value
+
             const payload = {
                 client_name: currentClientName, // Uses the current user's name
                 description: description,
-                task_date: taskDate || null // Send null if date is not provided
+                task_date: taskDate || null, // Send null if date is not provided
+                priority: priority // NEW: Include priority in the payload
             };
 
             try {
@@ -420,7 +444,7 @@
                 }
             } catch (error) {
                 console.error("Rollover request failed:", error);
-                alert("Network error or server unavailable for rollover.");
+                alert("Network error or server unavailable.");
             }
         }
 
@@ -475,7 +499,7 @@
             } else {
                 showNameSelectionScreen();
             }
-	    setInterval(fetchAndRenderTasks, TASKS_REFRESH_INTERVAL_MS); // Set up automatic refresh
+        setInterval(fetchAndRenderTasks, TASKS_REFRESH_INTERVAL_MS); // Set up automatic refresh
         });
     </script>
 </body>

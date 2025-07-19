@@ -55,7 +55,8 @@ async fn setup_test_db_pool() -> SqlitePool {
             task_date DATE NOT NULL,
             client_color TEXT NOT NULL,
             created_at TIMESTAMP NOT NULL,
-            deleted_at TIMESTAMP WITH TIME ZONE NULL
+            deleted_at TIMESTAMP WITH TIME ZONE NULL,
+            priority INTEGER NULL
         );
         "#,
     )
@@ -76,7 +77,8 @@ async fn test_create_and_list_tasks() {
     let create_payload = json!({
         "client_name": "Test Client",
         "description": "Test Task Description",
-        "task_date": today_str
+        "task_date": today_str,
+        "priority": 1
     });
 
     let request = Request::builder()
@@ -123,7 +125,8 @@ async fn test_delete_task() {
     let create_payload = json!({
         "client_name": "Client to Delete",
         "description": "A task to be deleted",
-        "task_date": today_str
+        "task_date": today_str,
+        "priority": 1
     });
     let request = Request::builder()
         .method("POST")
@@ -172,7 +175,8 @@ async fn test_rollover_tasks() {
     let create_payload = json!({
         "client_name": "Rollover Client",
         "description": "This task should roll over",
-        "task_date": today.to_string()
+        "task_date": today.to_string(),
+        "priority": 1
     });
     let request = Request::builder()
         .method("POST")

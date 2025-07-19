@@ -36,7 +36,8 @@ pub async fn establish_connection_pool(database_url: &str) -> Result<SqlitePool>
             task_date DATE NOT NULL,
             client_color TEXT NOT NULL,
             created_at TIMESTAMP NOT NULL,
-            deleted_at TIMESTAMP WITH TIME ZONE NULL
+            deleted_at TIMESTAMP WITH TIME ZONE NULL,
+            priority INTEGER NULL
         );
         "#,
     )
@@ -56,7 +57,7 @@ pub async fn get_current_week_tasks_from_db(pool: &SqlitePool) -> Result<Vec<Tas
     let week_end = today.week(Weekday::Mon).last_day();
 
     let tasks = sqlx::query_as::<_, Task>(
-        "SELECT * FROM tasks WHERE task_date BETWEEN ? AND ? AND deleted_at IS NULL", // <-- Filter out deleted tasks
+        "SELECT * FROM tasks WHERE task_date BETWEEN ? AND ? AND deleted_at IS NULL ORDER BY task_date ASC, priority ASC NULLS LAST;",
     )
     .bind(week_start)
     .bind(week_end)
@@ -73,18 +74,19 @@ pub async fn create_task_in_db(pool: &SqlitePool, payload: CreateTaskPayload) ->
     let client_color = colors::get_or_assign_client_color(&payload.client_name);
     let created_at = Utc::now();
 
-    debug!("Insert values: client_name={}, description={}, task_date={}, client_color={}, created_at={}",
-           payload.client_name, payload.description, task_date, client_color, created_at);
+    debug!("Insert values: client_name={}, description={}, task_date={}, client_color={}, created_at={}, priority={:?}",
+           payload.client_name, payload.description, task_date, client_color, created_at, payload.priority);
 
     // Make sure to include deleted_at in the column list and provide a value (NULL for new tasks)
     let id = sqlx::query(
-        "INSERT INTO tasks (client_name, description, task_date, client_color, created_at, deleted_at) VALUES (?, ?, ?, ?, ?, NULL)"
+        "INSERT INTO tasks (client_name, description, task_date, client_color, created_at, deleted_at, priority) VALUES (?, ?, ?, ?, ?, NULL, ?)"
     )
     .bind(&payload.client_name)
     .bind(&payload.description)
     .bind(task_date)
     .bind(&client_color)
     .bind(created_at)
+    .bind(payload.priority)
     .execute(pool)
     .await
     .context("Failed to insert task into DB")?
@@ -98,6 +100,7 @@ pub async fn create_task_in_db(pool: &SqlitePool, payload: CreateTaskPayload) ->
         client_color,
         created_at,
         deleted_at: None, // Newly created tasks are not deleted
+        priority: payload.priority,
     };
 
     Ok(new_task)
@@ -201,7 +204,8 @@ mod tests {
                 task_date DATE NOT NULL,
                 client_color TEXT NOT NULL,
                 created_at TIMESTAMP NOT NULL,
-                deleted_at TIMESTAMP WITH TIME ZONE NULL
+                deleted_at TIMESTAMP WITH TIME ZONE NULL,
+                priority INTEGER NULL
             );
             "#,
         )
@@ -219,6 +223,7 @@ mod tests {
             client_name: "Test Client".to_string(),
             description: "Test the database".to_string(),
             task_date: Some(today),
+            priority: Some(5),
         };
 
         // Act: Create a new task in the test database
@@ -228,6 +233,7 @@ mod tests {
         assert_eq!(created_task.client_name, "Test Client");
         assert_eq!(created_task.description, "Test the database");
         assert_eq!(created_task.task_date, today);
+        assert_eq!(created_task.priority, Some(5));
         assert!(created_task.id > 0); // Should have been assigned an ID by the DB
 
         // Act: Retrieve tasks for the current week
@@ -236,9 +242,29 @@ mod tests {
         // Assert: The newly created task is in the list
         assert_eq!(week_tasks.len(), 1);
         assert_eq!(week_tasks[0].id, created_task.id);
+        assert_eq!(week_tasks[0].priority, Some(5));
 
         // Call this last to remove the created directory and its contents
         teardown_test_env_for_file_cleanup(&get_test_data_dir());
+    }
+
+    #[tokio::test]
+    async fn test_create_task_without_priority() {
+        let pool = setup_test_db().await.unwrap();
+        let today = Utc::now().date_naive();
+        let payload = CreateTaskPayload {
+            client_name: "Client No Prio".to_string(),
+            description: "Task without priority".to_string(),
+            task_date: Some(today),
+            priority: None, // No priority
+        };
+
+        let created_task = create_task_in_db(&pool, payload).await.unwrap();
+        assert_eq!(created_task.priority, None); // Assert priority is None
+
+        let week_tasks = get_current_week_tasks_from_db(&pool).await.unwrap();
+        assert_eq!(week_tasks.len(), 1);
+        assert_eq!(week_tasks[0].priority, None); // Assert retrieved priority is None
     }
 
     #[tokio::test]
@@ -248,6 +274,7 @@ mod tests {
             client_name: "Client to Delete".to_string(),
             description: "This task will be deleted".to_string(),
             task_date: Some(Utc::now().date_naive()),
+            priority: Some(1),
         };
         let task_to_delete = create_task_in_db(&pool, payload).await.unwrap();
 
@@ -279,6 +306,7 @@ mod tests {
             client_name: "Rollover Client".to_string(),
             description: "A task for today".to_string(),
             task_date: Some(today),
+            priority: Some(10),
         };
         create_task_in_db(&pool, payload_today).await.unwrap();
 
@@ -288,6 +316,7 @@ mod tests {
             client_name: "Other Client".to_string(),
             description: "A task from another day".to_string(),
             task_date: Some(other_date),
+            priority: Some(20),
         };
         create_task_in_db(&pool, payload_other).await.unwrap();
 
@@ -305,5 +334,153 @@ mod tests {
                 .unwrap();
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].task_date, tomorrow);
+        assert_eq!(tasks[0].priority, Some(10));
+    }
+
+    #[tokio::test]
+    async fn test_get_tasks_order_by_priority() {
+        let pool = setup_test_db().await.unwrap();
+        let today = Utc::now().date_naive();
+
+        // Create tasks with different priorities
+        create_task_in_db(
+            &pool,
+            CreateTaskPayload {
+                client_name: "Client A".to_string(),
+                description: "Task Low Prio".to_string(),
+                task_date: Some(today),
+                priority: Some(10),
+            },
+        )
+        .await
+        .unwrap();
+
+        create_task_in_db(
+            &pool,
+            CreateTaskPayload {
+                client_name: "Client B".to_string(),
+                description: "Task High Prio".to_string(),
+                task_date: Some(today),
+                priority: Some(1),
+            },
+        )
+        .await
+        .unwrap();
+
+        create_task_in_db(
+            &pool,
+            CreateTaskPayload {
+                client_name: "Client C".to_string(),
+                description: "Task Medium Prio".to_string(),
+                task_date: Some(today),
+                priority: Some(5),
+            },
+        )
+        .await
+        .unwrap();
+
+        create_task_in_db(
+            &pool,
+            CreateTaskPayload {
+                client_name: "Client D".to_string(),
+                description: "Task No Prio".to_string(),
+                task_date: Some(today),
+                priority: None, // No priority
+            },
+        )
+        .await
+        .unwrap();
+
+        // Retrieve tasks
+        let tasks = get_current_week_tasks_from_db(&pool).await.unwrap();
+
+        // Assert order: Task with priority 1 should be first, then 5, then 10, then None
+        // (assuming all are for today and `ORDER BY priority ASC NULLS LAST` works as expected)
+        // Note: The `task_date` also plays a role in `get_current_week_tasks_from_db`.
+        // Let's create tasks for the same date to test priority ordering specifically.
+        // Re-running test with only today's date for simpler priority ordering test.
+
+        // Filter to only tasks for today to test priority ordering directly
+        let today_tasks: Vec<Task> = tasks.into_iter().filter(|t| t.task_date == today).collect();
+
+        // Sort order should be: priority 1, priority 5, priority 10, None
+        assert_eq!(today_tasks.len(), 4); // Client A, C, D (all for today)
+        assert_eq!(today_tasks[0].priority, Some(1)); // Client B, if it was for today.
+        assert_eq!(today_tasks[0].description, "Task High Prio".to_string()); // This task has priority 1
+        assert_eq!(today_tasks[1].priority, Some(5)); // This task has priority 5
+        assert_eq!(today_tasks[2].priority, Some(10)); // This task has priority 10
+                                                       // The task with None priority will be last if there are other tasks with None priority.
+                                                       // In this case, `NULLS LAST` will put it after 10.
+                                                       // Let's refine the test to make sure only tasks for today are considered and their order.
+
+        // To properly test the priority order, we should ensure all tasks are for the same date
+        // and then check their relative order.
+        // The `get_current_week_tasks_from_db` already sorts by `task_date` first.
+        // Let's create a new test that specifically checks the priority order for tasks on the same date.
+    }
+
+    #[tokio::test]
+    async fn test_priority_ordering_on_same_date() {
+        let pool = setup_test_db().await.unwrap();
+        let today = Utc::now().date_naive();
+
+        // Create tasks for today with various priorities
+        create_task_in_db(
+            &pool,
+            CreateTaskPayload {
+                client_name: "Client C".to_string(),
+                description: "Task Medium Prio".to_string(),
+                task_date: Some(today),
+                priority: Some(5),
+            },
+        )
+        .await
+        .unwrap();
+
+        create_task_in_db(
+            &pool,
+            CreateTaskPayload {
+                client_name: "Client A".to_string(),
+                description: "Task Low Prio".to_string(),
+                task_date: Some(today),
+                priority: Some(10),
+            },
+        )
+        .await
+        .unwrap();
+
+        create_task_in_db(
+            &pool,
+            CreateTaskPayload {
+                client_name: "Client B".to_string(),
+                description: "Task High Prio".to_string(),
+                task_date: Some(today),
+                priority: Some(1),
+            },
+        )
+        .await
+        .unwrap();
+
+        create_task_in_db(
+            &pool,
+            CreateTaskPayload {
+                client_name: "Client D".to_string(),
+                description: "Task No Prio".to_string(),
+                task_date: Some(today),
+                priority: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        // Retrieve tasks for the current week (all created tasks are for today)
+        let tasks = get_current_week_tasks_from_db(&pool).await.unwrap();
+
+        // Assert the order based on priority (1, 5, 10, None)
+        assert_eq!(tasks.len(), 4);
+        assert_eq!(tasks[0].description, "Task High Prio"); // Priority 1
+        assert_eq!(tasks[1].description, "Task Medium Prio"); // Priority 5
+        assert_eq!(tasks[2].description, "Task Low Prio"); // Priority 10
+        assert_eq!(tasks[3].description, "Task No Prio"); // Priority None (NULLS LAST)
     }
 }

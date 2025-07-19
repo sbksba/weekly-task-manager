@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+## [1.0.0-alpha.2] - 2025-07-15
+
+### Added
+- **Task Priority:** Introduced an optional `priority` field for tasks, allowing users to assign a numerical importance (lower number = higher priority).
+
+### Changed
+- **Frontend Task Sorting:** Updated the client application to sort tasks by date, then priority, then creation date.
+- **Dashboard Task Sorting:** Enhanced the dashboard to display tasks within each day sorted by priority.
+
 ## [1.0.0-alpha.1] - 2025-07-15
 
 ### Added
