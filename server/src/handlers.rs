@@ -173,25 +173,29 @@ mod tests {
         client_name: &str,
         description: &str,
         date: Option<NaiveDate>,
+        priority: Option<i32>,
     ) -> Json<CreateTaskPayload> {
         Json(CreateTaskPayload {
             client_name: client_name.to_string(),
             description: description.to_string(),
             task_date: date,
+            priority: priority,
         })
     }
 
     #[tokio::test]
     async fn test_create_task_validation_empty_name() {
-        // Arrange
         // We can use a closed pool because the validation fails before any DB access.
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        let payload = create_test_payload("", "A valid description", Some(Utc::now().date_naive()));
+        let payload = create_test_payload(
+            "",
+            "A valid description",
+            Some(Utc::now().date_naive()),
+            None,
+        );
 
-        // Act
         let result = create_task(State(pool), payload).await;
 
-        // Assert
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert_eq!(err.code, StatusCode::BAD_REQUEST);
@@ -200,15 +204,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_task_validation_date_in_past() {
-        // Arrange
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
         let past_date = NaiveDate::from_ymd_opt(2020, 1, 1).unwrap();
-        let payload = create_test_payload("Test Client", "A valid description", Some(past_date));
+        let payload =
+            create_test_payload("Test Client", "A valid description", Some(past_date), None);
 
-        // Act
         let result = create_task(State(pool), payload).await;
 
-        // Assert
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert_eq!(err.code, StatusCode::BAD_REQUEST);

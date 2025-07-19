@@ -48,6 +48,8 @@ This application provides the core backend services for managing weekly tasks, i
 
 * **Client Management:** Automatically assign unique IDs and colors to clients based on their name.
 
+* **Task Prioritization:** Assign an optional numerical priority to tasks to help organize workload.
+
 * **Delete Task:** Permanently delete any task from the system.
 
 * **Automatic Rollover:** Uncompleted non-recurrent tasks from the current day are automatically rolled over to the next day.
@@ -122,9 +124,9 @@ The backend exposes the following RESTful API endpoints:
 **Note on `Task` and `CreateTaskPayload` structure:**
 (See `common/src/lib.rs` for full details)
 
-* **`Task`**: `id`, `client_id`, `client_name`, `description`, `task_date`, `client_color`, `deleted_at`, `created_at`.
+* **`Task`**: `id`, `client_id`, `client_name`, `description`, `task_date`, `client_color`, `deleted_at`, `created_at`, `priority` (optional).
 
-* **`CreateTaskPayload`**: `client_name`, `description`, `task_date` (optional).
+* **`CreateTaskPayload`**: `client_name`, `description`, `task_date` (optional), `priority` (optional).
 
 ## Getting Started
 
@@ -547,8 +549,6 @@ The SQLite database file (`tasks.db`) will be persisted in a `data/` directory (
 
 ## Future Enhancements (Roadmap)
 
-* **Task Prioritization:** Assign a numerical priority to tasks to help organize workload.
-
 * **Recurrent Tasks:**  Define tasks that repeat at a specified interval (e.g., daily, weekly).
 
 * **"Done" vs. "Delete" Semantics:** Implement distinct "done" and "permanent delete" functionalities, especially for recurrent tasks.
@@ -563,7 +563,7 @@ The SQLite database file (`tasks.db`) will be persisted in a `data/` directory (
 
 * **Frontend Integration:** Develop a full-fledged frontend application (e.g., using React, Vue, Svelte) to consume this API.
 
-* **Advanced Analytics:** Dashboard features to visualize task completion rates, priorities, etc.
+* **Advanced Analytics:** Dashboard features to visualize task completion rates, etc.
 
 ## Contributing
 
