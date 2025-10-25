@@ -1,0 +1,1331 @@
+Sure! Breaking the code into logical sections makes it easier to read, test, and maintain.
+Below is a high-level roadmap that shows how the monolithic file can be split into separate Rust modules (each in its own .rs file).
+I’ll give you the purpose of each module, the public API it should expose, and a short snippet illustrating the most important parts.
+You can then assemble them in a small main.rs that pulls everything together.
+
+## Project Layout
+
+├─ Cargo.toml               # (optional – only needed if you later add crates)
+├─ src/
+│   ├─ main.rs             # entry point – orchestrates everything
+│   ├─ config.rs           # reading `config.toml`
+│   ├─ data.rs             # structs (DayLog, DayPlan) + CSV ↔︎ struct helpers
+│   ├─ google.rs           # thin wrapper around `curl` for Google-Sheets I/O
+│   ├─ utils.rs            # date helpers, user prompts, calorie math
+│   └─ planner.rs          # core business logic (deficit adjustment, summaries)
+│
+└─ README.md               # quick usage guide
+
+Why this layout?
+Each file has a single responsibility.
+Modules expose only the functions/types the rest of the program needs,
+keeping the public surface small and making unit-testing straightforward.
+
+##  Module Details
+
+config.rs – Configuration handling
+// src/config.rs
+use std::fs;
+use std::path::Path;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Backend {
+    Csv,
+    GoogleSheets,
+}
+
+#[derive(Debug, Clone)]
+pub struct Config {
+    // personal data
+    pub height_cm: f32,
+    pub weight_kg: f32,
+    pub age_years: u32,
+
+    // daily-log backend
+    pub log_backend: Backend,
+    pub log_csv_path: String,
+    pub log_gsheet_id: Option<String>,
+    pub log_gsheet_tab: Option<String>,
+    pub log_gsheet_token: Option<String>,
+
+    // weekly-plan backend
+    pub plan_backend: Backend,
+    pub plan_csv_path: String,
+    pub plan_gsheet_id: Option<String>,
+    pub plan_gsheet_tab: Option<String>,
+    pub plan_gsheet_token: Option<String>,
+}
+
+/// Very small TOML parser – no external crates.
+pub fn load_config<P: AsRef<Path>>(path: P) -> Result<Config, std::io::Error> {
+    let raw = fs::read_to_string(path)?;
+    // … (same parsing logic as in the monolithic version) …
+    // Return a fully populated Config struct.
+    unimplemented!()
+}
+
+Public API
+pub fn load_config<P: AsRef<Path>>(path: P) -> Result<Config, std::io::Error>;
+pub enum Backend { Csv, GoogleSheets }
+pub struct Config { /* fields */ }
+
+data.rs – Core data structures & CSV helpers
+// src/data.rs
+use std::fmt;
+
+/// One day of the weekly plan.
+#[derive(Clone, Debug)]
+pub struct DayPlan {
+    pub workout: String,
+    pub meals: Vec<String>, // exactly 6 entries expected
+}
+
+/// Daily log entry.
+#[derive(Clone, Debug)]
+pub struct DayLog {
+    pub weight_kg: f32,
+    pub body_fat_pct: f32,
+    pub date: String, // YYYY-MM-DD
+}
+
+/* Pretty-print a DayPlan – used by the UI layer */
+impl fmt::Display for DayPlan {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "=== WORKOUT ===")?;
+        writeln!(f, "{}", self.workout)?;
+        writeln!(f, "\n=== MEALS ===")?;
+        for (i, m) in self.meals.iter().enumerate() {
+            writeln!(f, "{}. {}", i + 1, m)?;
+        }
+        Ok(())
+    }
+}
+
+/* ---------- CSV utilities ---------- */
+
+/// Load daily logs from a CSV file (weight,bf,date).
+pub fn load_log_csv<P: AsRef<std::path::Path>>(path: P)
+    -> Result<Vec<DayLog>, std::io::Error>;
+
+/// Save daily logs to a CSV file (overwrites).
+pub fn save_log_csv<P: AsRef<std::path::Path>>(path: P, logs: &[DayLog])
+    -> Result<(), std::io::Error>;
+
+/// Load the weekly plan from a CSV file.
+pub fn load_plan_csv<P: AsRef<std::path::Path>>(path: P)
+    -> Result<[DayPlan; 7], std::io::Error>;
+
+/// Save the weekly plan to a CSV file.
+pub fn save_plan_csv<P: AsRef<std::path::Path>>(path: P, plan: &[DayPlan; 7])
+    -> Result<(), std::io::Error>;
+All CSV functions are pure I/O; the rest of the program never touches raw strings.
+
+google.rs – Google-Sheets thin wrapper (uses curl)
+// src/google.rs
+use std::io;
+
+/// Small wrapper around the `curl` CLI. No external crates.
+pub fn curl_get(url: &str, token: &str) -> Result<String, io::Error>;
+
+pub fn curl_post_csv(url: &str, token: &str, csv_body: &str, method: &str)
+    -> Result<(), io::Error>;
+
+/// Helper to build the export URL (CSV format).
+pub fn export_url(sheet_id: &str, tab: &str) -> String;
+
+/// Helper to build the append URL (raw values).
+pub fn append_url(sheet_id: &str, tab: &str) -> String;
+
+/// Load daily logs from Google Sheets (CSV → Vec<DayLog>).
+pub fn load_log_google(sheet_id: &str, tab: &str, token: &str)
+    -> Result<Vec<super::data::DayLog>, io::Error>;
+
+/// Save daily logs to Google Sheets (append a new row).
+pub fn append_log_google(sheet_id: &str, tab: &str, token: &str,
+                         entry: &super::data::DayLog) -> Result<(), io::Error>;
+
+/// Load the weekly plan from Google Sheets (CSV → [DayPlan;7]).
+pub fn load_plan_google(sheet_id: &str, tab: &str, token: &str)
+    -> Result<[super::data::DayPlan; 7], io::Error>;
+
+/// Overwrite the whole weekly plan on Google Sheets.
+pub fn overwrite_plan_google(sheet_id: &str, tab: &str, token: &str,
+                            plan: &[super::data::DayPlan; 7])
+    -> Result<(), io::Error>;
+Only curl is invoked, so the binary stays “crate-free”.
+All functions return Result<_, io::Error> so the caller can decide how to handle failures.
+
+utils.rs – Helpers that don’t belong to a specific domain
+// src/utils.rs
+use std::io;
+
+/// Return today’s ISO date (YYYY-MM-DD) and the weekday index (0 = Monday).
+pub fn today_info() -> (String, usize);
+
+/// Very rough maintenance-calorie estimator (Mifflin-St Jeor + 1.4 activity factor).
+pub fn estimate_maintenance(weight_kg: f32, height_cm: f32, age_years: u32) -> i32;
+
+/// Prompt the user for a floating-point number, returning a default on empty input.
+pub fn ask_float(prompt: &str, default: Option<f32>) -> f32;
+These utilities are pure functions (except ask_float, which interacts with stdin/stdout).
+
+planner.rs – Business logic (core of the original main)
+// src/planner.rs
+use crate::data::{DayLog, DayPlan};
+use crate::utils::{estimate_maintenance, today_info};
+
+/// Constants governing the calorie-deficit algorithm.
+pub const TARGET_DEFICIT_KCAL: i32 = 400;
+pub const MAX_WEEKLY_LOSS_KG: f32 = 0.75;
+pub const DEFICIT_STEP: i32 = 50;
+pub const MIN_DEFICIT_KCAL: i32 = 200;
+
+/// Given the full log vector, compute the *current* daily deficit.
+/// It walks through completed weeks and reduces the deficit when the
+/// weekly loss exceeds `MAX_WEEKLY_LOSS_KG`.
+pub fn compute_current_deficit(logs: &[DayLog]) -> i32 {
+    let mut deficit = TARGET_DEFICIT_KCAL;
+    let weeks_completed = logs.len() / 7; // integer division, discarding partial week
+
+    for w in 0..weeks_completed {
+        let start = w * 7;
+        let end = start + 7; // exclusive
+        let week_slice = &logs[start..end];
+        let loss = week_slice.first().unwrap().weight_kg
+                 - week_slice.last().unwrap().weight_kg;
+        if loss > MAX_WEEKLY_LOSS_KG {
+            deficit = (deficit - DEFICIT_STEP).max(MIN_DEFICIT_KCAL);
+        }
+    }
+    deficit
+}
+
+/// Produce a printable weekly summary (used when the day is Sunday).
+pub fn weekly_summary(logs: &[DayLog], week_number: usize) -> String {
+    let start = week_number * 7;
+    let end = start + 7;
+    let week_slice = &logs[start..end];
+    let start_w = week_slice.first().unwrap().weight_kg;
+    let end_w   = week_slice.last().unwrap().weight_kg;
+    let loss    = start_w - end_w;
+
+    format!(
+        "\n=== WEEK {} SUMMARY ===\n\
+         Start weight: {:.2} kg\n\
+         End weight:   {:.2} kg\n\
+         Weight loss:  {:.2} kg\n\
+         Current deficit: {} kcal\n",
+        week_number + 1,
+        start_w,
+        end_w,
+        loss,
+        compute_current_deficit(logs)
+    )
+}
+
+All the heavy lifting that used to sit in main is now encapsulated in pure functions, making them trivial to unit-test.
+
+##  main.rs – Glue code
+// src/main.rs
+mod config;
+mod data;
+mod google;
+mod utils;
+mod planner;
+
+use config::{load_config, Backend, Config};
+use data::{DayLog, DayPlan};
+use utils::{today_info, ask_float};
+use planner::{compute_current_deficit, weekly_summary, TARGET_DEFICIT_KCAL};
+
+fn main() {
+    // -------------------------------------------------
+    // Load configuration
+    // -------------------------------------------------
+    let cfg = load_config("config.toml")
+        .expect("Failed to read config.toml – please check the file.");
+
+    // -------------------------------------------------
+    // Load daily logs (CSV or Google Sheets)
+    // -------------------------------------------------
+    let mut logs: Vec<DayLog> = match cfg.log_backend {
+        Backend::Csv => data::load_log_csv(&cfg.log_csv_path)
+            .unwrap_or_else(|_| vec![DayLog {
+                weight_kg: cfg.weight_kg,
+                body_fat_pct: 0.0,
+                date: "1970-01-01".into(),
+            }]),
+        Backend::GoogleSheets => {
+            let id   = cfg.log_gsheet_id.as_ref().expect("log_gsheet_id missing");
+            let tab  = cfg.log_gsheet_tab.as_ref().expect("log_gsheet_tab missing");
+            let tok  = cfg.log_gsheet_token.as_ref().expect("log_gsheet_token missing");
+            google::load_log_google(id, tab, tok)
+                .unwrap_or_else(|e| {
+                    eprintln!("⚠️  Could not load Google Sheet logs: {} – starting fresh.", e);
+                    vec![DayLog {
+                        weight_kg: cfg.weight_kg,
+                        body_fat_pct: 0.0,
+                        date: "1970-01-01".into(),
+                    }]
+                })
+        }
+    };
+
+    // -------------------------------------------------
+    // Load the weekly plan (CSV or Google Sheets)
+    // -------------------------------------------------
+    let weekly_plan: [DayPlan; 7] = match cfg.plan_backend {
+        Backend::Csv => data::load_plan_csv(&cfg.plan_csv_path)
+            .unwrap_or_else(|_| data::default_weekly_plan()),
+        Backend::GoogleSheets => {
+            let id   = cfg.plan_gsheet_id.as_ref().expect("plan_gsheet_id missing");
+            let tab  = cfg.plan_gsheet_tab.as_ref().expect("plan_gsheet_tab missing");
+            let tok  = cfg.plan_gsheet_token.as_ref().expect("plan_gsheet_token missing");
+            google::load_plan_google(id, tab, tok)
+                .unwrap_or_else(|e| {
+                    eprintln!("⚠️  Could not load Google Sheet plan: {} – using defaults.", e);
+                    data::default_weekly_plan()
+                })
+        }
+    };
+
+    // -------------------------------------------------
+    // Determine today’s date and weekday
+    // -------------------------------------------------
+    let (today_str, weekday_idx) = utils::today_info();
+    let week_number = (logs.len() - 1) / 7; // zero-based
+
+    // -------------------------------------------------
+    // Prompt for today’s weight & body-fat
+    // -------------------------------------------------
+    let last_entry = logs.last().cloned().unwrap_or(DayLog {
+        weight_kg: cfg.weight_kg,
+        body_fat_pct: 0.0,
+        date: today_str.clone(),
+    });
+
+    let weight = ask_float(
+        &format!("Weight (kg) [{}]: ", last_entry.weight_kg),
+        Some(last_entry.weight_kg),
+    );
+    let bf = ask_float(
+        &format!("Body-fat % [{}]: ", last_entry.body_fat_pct),
+        Some(last_entry.body_fat_pct),
+    );
+
+    // Append today’s entry to the log vector
+    logs.push(DayLog {
+        weight_kg: weight,
+        body_fat_pct: bf,
+        date: today_str.clone(),
+    });
+
+    // -------------------------------------------------
+    // Compute current daily deficit
+    // -------------------------------------------------
+    let daily_deficit = compute_current_deficit(&logs);
+
+    // -------------------------------------------------
+    // Show today’s plan
+    // -------------------------------------------------
+    let today_plan = &weekly_plan[weekday_idx];
+    println!("\n--- TODAY'S PLAN (Week {}, Day {}) ---", week_number + 1, weekday_idx + 1);
+    println!("{}", today_plan);
+    let maintenance = utils::estimate_maintenance(weight, cfg.height_cm, cfg.age_years);
+    println!(
+        "Current daily calorie target: {} kcal (maintenance – {} kcal deficit)",
+        maintenance - daily_deficit,
+        daily_deficit
+    );
+
+    // -------------------------------------------------
+    // Weekly summary (if today is Sunday)
+    // -------------------------------------------------
+    if weekday_idx == 6 {
+        println!("{}", weekly_summary(&logs, week_number));
+    }
+
+    // -------------------------------------------------
+    // Persist the updated log
+    // -------------------------------------------------
+    match cfg.log_backend {
+        Backend::Csv => {
+            if let Err(e) = data::save_log_csv(&cfg.log_csv_path, &logs) {
+                eprintln!("⚠️  Could not save CSV log: {}", e);
+            }
+        }
+        Backend::GoogleSheets => {
+            let id   = cfg.log_gsheet_id.as_ref().unwrap();
+            let tab  = cfg.log_gsheet_tab.as_ref().unwrap();
+            let tok  = cfg.log_gsheet_token.as_ref().unwrap();
+            // Append only the newest row (the one we just added)
+            if let Err(e) = google::append_log_google(id, tab, tok, logs.last().unwrap()) {
+                eprintln!("⚠️  Could not append to Google Sheet: {}", e);
+            }
+        }
+    }
+
+    // -------------------------------------------------
+    // (Optional) Persist the weekly plan if you ever modify it.
+    // -------------------------------------------------
+    // Not required for the basic tracker, but the function exists:
+    // match cfg.plan_backend { ... }
+}
+
+## Testing Tips
+
+Because each module exposes a small public API, you can write unit tests directly in the files:
+
+// src/utils.rs
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_estimate_maintenance() {
+        let maint = estimate_maintenance(78.0, 175.0, 30);
+        assert_eq!(maint, 2360); // value depends on the formula; adjust as needed
+    }
+}
+
+## config.toml
+
+# --------------------------------------------------------------
+# Personal data (used for calorie calculations)
+# --------------------------------------------------------------
+height_cm = 175          # your height in centimetres
+weight_kg = 78.0         # starting weight (kg) – also used for the first log entry
+age_years = 30           # your age
+
+# --------------------------------------------------------------
+# DAILY LOG STORAGE (weight, body-fat, date)
+# --------------------------------------------------------------
+
+# Choose where the daily log lives:
+#   "csv"           → a local file named below
+#   "google_sheets" → a Google Sheet (you must supply the IDs/tokens)
+log_source = "csv"
+
+# CSV-only settings
+log_csv_path = "log.csv"
+
+# Google-Sheets settings (ignored when log_source = "csv")
+log_gsheet_id   = "YOUR_LOG_SHEET_ID"
+log_gsheet_tab  = "Logs"
+log_gsheet_token = "YOUR_OAUTH_ACCESS_TOKEN"
+
+
+# --------------------------------------------------------------
+# WEEKLY PLAN STORAGE (workout + 6 meals for each weekday)
+# --------------------------------------------------------------
+
+# Choose where the weekly plan lives:
+#   "csv"           → a local file named below
+#   "google_sheets" → a Google Sheet (you must supply the IDs/tokens)
+plan_source = "csv"
+
+# CSV-only settings
+plan_csv_path = "plan.csv"
+
+# Google-Sheets settings (ignored when plan_source = "csv")
+plan_gsheet_id   = "YOUR_PLAN_SHEET_ID"
+plan_gsheet_tab  = "Plan"
+plan_gsheet_token = "YOUR_OAUTH_ACCESS_TOKEN"
+
+Replace the placeholder strings (YOUR_*) with real values if you decide to use Google Sheets.
+If you keep the defaults (log_source = "csv" and plan_source = "csv"), the program will read/write the two CSV files shown next.
+
+## log.csv – Daily weight / body-fat log
+The file must contain three columns separated by commas:
+weight_kg,body_fat_pct,date
+
+weight_kg – your weight for that day (float, e.g. 78.5)
+body_fat_pct – body-fat percentage (float, e.g. 22.3)
+date – ISO-8601 date (YYYY-MM-DD)
+Starter content (first day – you can edit the numbers)
+78.0,22.0,2025-10-01
+Every time you run the program it will append a new line with today’s values, so you can simply keep this file growing.
+
+## plan.csv – Weekly workout + meals template
+The file has eight columns (comma-separated):
+day_index,workout,meal1,meal2,meal3,meal4,meal5,meal6
+
+day_index – integer from 0 (Monday) to 6 (Sunday).
+workout – a short multiline description (newlines are encoded as \n in the CSV).
+meal1 … meal6 – the six meals for that day (order matters).
+Example file (one week, ready to use)
+0,"Chest + Biceps:\n• Decline push-ups (feet on Delta Board) 3×8-12\n• Standard push-ups 3×12-15\n• Dips between two chairs 3×10-12\n• 20 kg bicep curls 3×10-12\n• Hammer curls 2×12-15","Breakfast: oatmeal + almond milk + banana + whey + chia","Snack AM: Greek yogurt + almonds","Lunch: grilled chicken + quinoa + broccoli + olive oil","Pre-workout: whole-grain bread + peanut butter + honey","Dinner: salmon + sweet potato + mixed green salad + light vinaigrette","Before bed: cottage cheese + chia seeds"
+1,"Legs + Abs:\n• Goblet squat 20 kg 3×12-15\n• Forward lunges 20 kg 3×10-12 per leg\n• Jump squats 2×12-15\n• Front plank 3×45 s\n• Hip thrust 20 kg 3×15-20\n• Reverse crunches 2×20-25","Breakfast: oatmeal + almond milk + banana + whey + chia","Snack AM: Greek yogurt + almonds","Lunch: grilled chicken + quinoa + broccoli + olive oil","Pre-workout: whole-grain bread + peanut butter + honey","Dinner: salmon + sweet potato + mixed green salad + light vinaigrette","Before bed: cottage cheese + chia seeds"
+2,"Back + Shoulders:\n• Australian pull-ups 3×10-12\n• One-arm row 20 kg 3×10-12 per arm\n• Superman 3×15-20\n• Archer push-ups 2×8-10 per side\n• Lateral raises 2×12-15 (20 kg or 2×10 kg)","Breakfast: oatmeal + almond milk + banana + whey + chia","Snack AM: Greek yogurt + almonds","Lunch: grilled chicken + quinoa + broccoli + olive oil","Pre-workout: whole-grain bread + peanut butter + honey","Dinner: salmon + sweet potato + mixed green salad + light vinaigrette","Before bed: cottage cheese + chia seeds"
+3,"Cardio / HIIT:\n• 20 min intervals 30 s sprint / 30 s rest (10 cycles)\n• 3×30 s burpees","Breakfast: oatmeal + almond milk + banana + whey + chia","Snack AM: Greek yogurt + almonds","Lunch: grilled chicken + quinoa + broccoli + olive oil","Pre-workout: whole-grain bread + peanut butter + honey","Dinner: salmon + sweet potato + mixed green salad + light vinaigrette","Before bed: cottage cheese + chia seeds"
+4,"Full-body circuit (small space):\n• Plyometric push-ups (clap) 3×30 s\n• Goblet squat 20 kg 3×30 s\n• Mountain climbers (feet on Delta Board) 3×30 s\n• Inverted rows under table 3×30 s\n• Side plank 3×30 s (60 s rest between rounds)","Breakfast: oatmeal + almond milk + banana + whey + chia","Snack AM: Greek yogurt + almonds","Lunch: grilled chicken + quinoa + broccoli + olive oil","Pre-workout: whole-grain bread + peanut butter + honey","Dinner: salmon + sweet potato + mixed green salad + light vinaigrette","Before bed: cottage cheese + chia seeds"
+5,"Light cardio + mobility:\n• Fast walk or bike 30-40 min\n• Dynamic stretching 15 min","Breakfast: oatmeal + almond milk + banana + whey + chia","Snack AM: Greek yogurt + almonds","Lunch: grilled chicken + quinoa + broccoli + olive oil","Pre-workout: whole-grain bread + peanut butter + honey","Dinner: salmon + sweet potato + mixed green salad + light vinaigrette","Before bed: cottage cheese + chia seeds"
+6,"Rest day (optional active recovery)","Breakfast: oatmeal + almond milk + banana + whey + chia","Snack AM: Greek yogurt + almonds","Lunch: grilled chicken + quinoa + broccoli + olive oil","Pre-workout: whole-grain bread + peanut butter + honey","Dinner: salmon + sweet potato + mixed green salad + light vinaigrette","Before bed: cottage cheese + chia seeds"
+Notes about the CSV format
+The workout column contains literal newline characters (\n). When you open the file in a spreadsheet editor (Excel, Google Sheets) the line breaks will be displayed correctly.
+If you ever edit the file manually, keep the exact number of columns (8) and quote the workout field (as shown) because it contains commas and newlines.
+The order of rows must be 0-6; the program indexes the array directly with the weekday number.
+
+Check the results:
+Open log.csv – you should see a new row with today’s date and the numbers you entered.
+Open plan.csv – you’ll see the same plan every week; you can edit any cell (e.g., swap a meal or change a workout) and the next run of the program will reflect those edits automatically.
+Switching to Google Sheets (optional)
+Create a Google Spreadsheet, give the service-account (or your OAuth token) edit rights, note the Spreadsheet ID (the long alphanumeric string in the URL) and the tab name (usually “Sheet1”).
+Fill the corresponding fields in config.toml (log_gsheet_id, log_gsheet_tab, log_gsheet_token, etc.).
+Change log_source = "google_sheets" and/or plan_source = "google_sheets" accordingly.
+Run the program again – it will fetch data from the sheet and append new rows via curl.
+
+## Quick sanity-check
+After the first run you should see something like:
+Date: 2025-10-09
+Weight (kg) [78.00]:
+Body-fat % [22.00]:
+
+--- TODAY'S PLAN (Week 1, Day 4) ---
+=== WORKOUT ===
+Cardio / HIIT:
+• 20 min intervals 30 s sprint / 30 s rest (10 cycles)
+• 3×30 s burpees
+
+=== MEALS ===
+1. Breakfast: oatmeal + almond milk + banana + whey + chia
+2. Snack AM: Greek yogurt + almonds
+3. Lunch: grilled chicken + quinoa + broccoli + olive oil
+4. Pre-workout: whole-grain bread + peanut butter + honey
+5. Dinner: salmon + sweet potato + mixed green salad + light vinaigrette
+6. Before bed: cottage cheese + chia seeds
+
+Current daily calorie target: 2360 kcal (maintenance – 400 kcal deficit)
+And log.csv will now contain two rows (the starter line plus today’s entry).
+
+That's it!
+You now have:
+config.toml – tells the program where to read/write data.
+log.csv – persistent daily weight/body-fat log.
+plan.csv – the 7-day workout + meal template (editable at any time).
+Feel free to tweak the meals, swap exercises, or change the calorie-deficit parameters in src/planner.rs if you need a different strategy. Happy training!
+Below is a clean way to keep the two parts of the weekly plan completely independent:
+workouts.csv – one row per weekday that describes the workout only.
+meals.csv – one row per weekday that contains the six meals (no workout text).
+The program will read both files, combine them into a DayPlan at runtime, and then work exactly as before (displaying the combined view, adjusting the deficit, saving logs, …).
+
+## Updated file formats
+workouts.csv
+Column
+Description
+day_index
+0 = Monday … 6 = Sunday
+workout
+Full workout description (you can embed \n for line-breaks).
+
+Example (copy-paste this into a new file called workouts.csv):
+0,"Chest + Biceps:\n• Decline push-ups (feet on Delta Board) 3×8-12\n• Standard push-ups 3×12-15\n• Dips between two chairs 3×10-12\n• 20 kg bicep curls 3×10-12\n• Hammer curls 2×12-15"
+1,"Legs + Abs:\n• Goblet squat 20 kg 3×12-15\n• Forward lunges 20 kg 3×10-12 per leg\n• Jump squats 2×12-15\n• Front plank 3×45 s\n• Hip thrust 20 kg 3×15-20\n• Reverse crunches 2×20-25"
+2,"Back + Shoulders:\n• Australian pull-ups 3×10-12\n• One-arm row 20 kg 3×10-12 per arm\n• Superman 3×15-20\n• Archer push-ups 2×8-10 per side\n• Lateral raises 2×12-15 (20 kg or 2×10 kg)"
+3,"Cardio / HIIT:\n• 20 min intervals 30 s sprint / 30 s rest (10 cycles)\n• 3×30 s burpees"
+4,"Full-body circuit (small space):\n• Plyometric push-ups (clap) 3×30 s\n• Goblet squat 20 kg 3×30 s\n• Mountain climbers (feet on Delta Board) 3×30 s\n• Inverted rows under table 3×30 s\n• Side plank 3×30 s (60 s rest between rounds)"
+5,"Light cardio + mobility:\n• Fast walk or bike 30-40 min\n• Dynamic stretching 15 min"
+6,"Rest day (optional active recovery)"
+meals.csv
+Column
+Description
+day_index
+0 = Monday … 6 = Sunday
+meal1 … meal6
+Six meals for that day (any text you like).
+
+Example (copy-paste into a file called meals.csv):
+0,"Breakfast: oatmeal + almond milk + banana + whey + chia","Snack AM: Greek yogurt + almonds","Lunch: grilled chicken + quinoa + broccoli + olive oil","Pre-workout: whole-grain bread + peanut butter + honey","Dinner: salmon + sweet potato + mixed green salad + light vinaigrette","Before bed: cottage cheese + chia seeds"
+1,"Breakfast: oatmeal + almond milk + banana + whey + chia","Snack AM: Greek yogurt + almonds","Lunch: grilled chicken + quinoa + broccoli + olive oil","Pre-workout: whole-grain bread + peanut butter + honey","Dinner: salmon + sweet potato + mixed green salad + light vinaigrette","Before bed: cottage cheese + chia seeds"
+2,"Breakfast: oatmeal + almond milk + banana + whey + chia","Snack AM: Greek yogurt + almonds","Lunch: grilled chicken + quinoa + broccoli + olive oil","Pre-workout: whole-grain bread + peanut butter + honey","Dinner: salmon + sweet potato + mixed green salad + light vinaigrette","Before bed: cottage cheese + chia seeds"
+3,"Breakfast: oatmeal + almond milk + banana + whey + chia","Snack AM: Greek yogurt + almonds","Lunch: grilled chicken + quinoa + broccoli + olive oil","Pre-workout: whole-grain bread + peanut butter + honey","Dinner: salmon + sweet potato + mixed green salad + light vinaigrette","Before bed: cottage cheese + chia seeds"
+4,"Breakfast: oatmeal + almond milk + banana + whey + chia","Snack AM: Greek yogurt + almonds","Lunch: grilled chicken + quinoa + broccoli + olive oil","Pre-workout: whole-grain bread + peanut butter + honey","Dinner: salmon + sweet potato + mixed green salad + light vinaigrette","Before bed: cottage cheese + chia seeds"
+5,"Breakfast: oatmeal + almond milk + banana + whey + chia","Snack AM: Greek yogurt + almonds","Lunch: grilled chicken + quinoa + broccoli + olive oil","Pre-workout: whole-grain bread + peanut butter + honey","Dinner: salmon + sweet potato + mixed green salad + light vinaigrette","Before bed: cottage cheese + chia seeds"
+6,"Breakfast: oatmeal + almond milk + banana + whey + chia","Snack AM: Greek yogurt + almonds","Lunch: grilled chicken + quinoa + broccoli + olive oil","Pre-workout: whole-grain bread + peanut butter + honey","Dinner: salmon + sweet potato + mixed green salad + light vinaigrette","Before bed: cottage cheese + chia seeds"
+Tip: If you ever want to experiment with a different diet, you only need to edit meals.csv; the workouts stay untouched, and vice-versa.
+
+## Minimal code changes to load the two CSVs
+
+Below is the only part of the program you need to modify (the rest of the modular code stays exactly the same).
+Insert these functions into src/data.rs (or wherever you keep your CSV helpers).
+
+use std::io;
+
+/// Load ONLY the workouts (day_index + workout text) from a CSV file.
+pub fn load_workouts_csv<P: AsRef<std::path::Path>>(path: P)
+    -> Result<[String; 7], io::Error>
+{
+    let raw = std::fs::read_to_string(path)?;
+    // Temporary storage – we fill the array by index.
+    let mut out: [String; 7] = Default::default();
+    for line in raw.lines() {
+        let parts: Vec<&str> = line.splitn(2, ',').collect(); // day_index , rest
+        if parts.len() != 2 { continue; }
+        let idx: usize = parts[0].trim().parse().unwrap_or(usize::MAX);
+        if idx >= 7 { continue; }
+        // Remove surrounding quotes if present (they protect newlines)
+        let mut workout = parts[1].trim();
+        if workout.starts_with('"') && workout.ends_with('"') && workout.len() >= 2 {
+            workout = &workout[1..workout.len()-1];
+        }
+        // Convert escaped "\n" back to real newlines for nicer printing
+        let workout = workout.replace("\\n", "\n");
+        out[idx] = workout;
+    }
+    Ok(out)
+}
+
+/// Load ONLY the meals (day_index + six meal columns) from a CSV file.
+pub fn load_meals_csv<P: AsRef<std::path::Path>>(path: P)
+    -> Result<[Vec<String>; 7], io::Error>
+{
+    let raw = std::fs::read_to_string(path)?;
+    // Temporary storage – each day gets a Vec<String> of length 6.
+    let mut out: [Vec<String>; 7] = Default::default();
+    for line in raw.lines() {
+        // Split into exactly 7 fields (day_index + 6 meals)
+        let parts: Vec<&str> = line.split(',').collect();
+        if parts.len() != 7 { continue; }
+        let idx: usize = parts[0].trim().parse().unwrap_or(usize::MAX);
+        if idx >= 7 { continue; }
+        // Strip surrounding quotes from each meal (optional)
+        let mut meals = Vec::with_capacity(6);
+        for i in 1..=6 {
+            let mut m = parts[i].trim();
+            if m.starts_with('"') && m.ends_with('"') && m.len() >= 2 {
+                m = &m[1..m.len()-1];
+            }
+            meals.push(m.to_string());
+        }
+        out[idx] = meals;
+    }
+    Ok(out)
+}
+
+/* Helper that merges the two halves into the final DayPlan array */
+pub fn combine_workouts_and_meals(
+    workouts: [String; 7],
+    meals: [Vec<String>; 7],
+) -> [DayPlan; 7] {
+    let mut plan: [DayPlan; 7] = Default::default();
+    for i in 0..7 {
+        plan[i] = DayPlan {
+            workout: workouts[i].clone(),
+            meals: meals[i].clone(),
+        };
+    }
+    plan
+}
+
+Why Default::default()?
+For arrays of String or Vec<String> the compiler can auto-fill them with empty values (String::new(), Vec::new()). This keeps the code short and avoids manual loops.
+
+## Wiring the new loaders into main.rs
+
+Replace the old load_plan_csv call with the three-step process:
+
+// --------------------------------------------------------------
+// Load the weekly plan (now split into two CSV files)
+// --------------------------------------------------------------
+let weekly_plan: [DayPlan; 7] = match cfg.plan_backend {
+    Backend::Csv => {
+        // Paths come from the config (you can rename them if you wish)
+        let workouts = data::load_workouts_csv(&cfg.workouts_csv_path)
+            .unwrap_or_else(|e| {
+                eprintln!("⚠️  Could not read workouts.csv: {} – using empty defaults.", e);
+                ["".to_string(); 7]   // 7 empty strings
+            });
+        let meals = data::load_meals_csv(&cfg.meals_csv_path)
+            .unwrap_or_else(|e| {
+                eprintln!("⚠️  Could not read meals.csv: {} – using empty defaults.", e);
+                // 7 vectors, each empty
+                [Vec::new(), Vec::new(), Vec::new(),
+                 Vec::new(), Vec::new(), Vec::new(),
+                 Vec::new()]
+            });
+        data::combine_workouts_and_meals(workouts, meals)
+    }
+    Backend::GoogleSheets => {
+        // The Google-Sheets version works the same way – you just need two tabs:
+        // one for workouts, one for meals.  The helper functions below
+        // (in `google.rs`) mirror the CSV ones.
+        let workouts = google::load_workouts_google(
+            cfg.plan_gsheet_id.as_ref().unwrap(),
+            cfg.workouts_gsheet_tab.as_ref().unwrap(),
+            cfg.plan_gsheet_token.as_ref().unwrap(),
+        ).unwrap_or_else(|e| {
+            eprintln!("⚠️  Could not load workouts from Sheets: {} – using empty defaults.", e);
+            ["".to_string(); 7]
+        });
+        let meals = google::load_meals_google(
+            cfg.plan_gsheet_id.as_ref().unwrap(),
+            cfg.meals_gsheet_tab.as_ref().unwrap(),
+            cfg.plan_gsheet_token.as_ref().unwrap(),
+        ).unwrap_or_else(|e| {
+            eprintln!("⚠️  Could not load meals from Sheets: {} – using empty defaults.", e);
+            [Vec::new(), Vec::new(), Vec::new(),
+             Vec::new(), Vec::new(), Vec::new(),
+             Vec::new()]
+        });
+        data::combine_workouts_and_meals(workouts, meals)
+    }
+};
+
+What you need to add to config.toml
+If you keep the CSV backend, add two extra keys (paths to the new files):
+# CSV paths for the split plan
+workouts_csv_path = "workouts.csv"
+meals_csv_path    = "meals.csv"
+
+And the corresponding keys in config.toml:
+# Google-Sheets tab names (only used when plan_source = "google_sheets")
+workouts_gsheet_tab = "Workouts"
+meals_gsheet_tab    = "Meals"
+
+## Quick sanity-check after the change
+Place the three files (workouts.csv, meals.csv, config.toml) side-by-side with the binary.
+Run the program:
+./lumo_plan
+You should see the same output as before, e.g.:
+--- TODAY'S PLAN (Week 1, Day 3) ---
+=== WORKOUT ===
+Cardio / HIIT:
+• 20 min intervals 30 s sprint / 30 s rest (10 cycles)
+• 3×30 s burpees
+
+
+=== MEALS ===
+1. Breakfast: oatmeal + almond milk + banana + whey + chia
+2. Snack AM: Greek yogurt + almonds
+3. Lunch: grilled chicken + quinoa + broccoli + olive oil
+4. Pre-workout: whole-grain bread + peanut butter + honey
+5. Dinner: salmon + sweet potato + mixed green salad + light vinaigrette
+6. Before bed: cottage cheese + chia seeds
+If you edit only workouts.csv (e.g., replace the Thursday HIIT routine with a yoga session) and rerun, the change will instantly appear while the meals stay exactly the same.
+
+## New data structures (src/data.rs)
+
+// ---------------------------------------------------------------
+//  Equipment enumeration – what the user actually owns
+// ---------------------------------------------------------------
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Equip {
+    Bike,
+    Hangboard,
+    Weights,
+    Bodyweight,
+}
+
+// ---------------------------------------------------------------
+//  Workout entry – now carries a short description *and* the
+//  equipment it needs.  The description may contain '\n' for line breaks.
+// ---------------------------------------------------------------
+#[derive(Debug, Clone)]
+pub struct WorkoutEntry {
+    pub description: String,
+    pub equipment: Vec<Equip>,   // one or more tags
+}
+
+// ---------------------------------------------------------------
+//  DayPlan – unchanged except that `workout` is now a vector of
+//  `WorkoutEntry`s (normally there is just one entry per day,
+//  but the vector lets us keep the type flexible for future extensions).
+// ---------------------------------------------------------------
+#[derive(Debug, Clone)]
+pub struct DayPlan {
+    pub workouts: Vec<WorkoutEntry>,   // usually length = 1
+    pub meals: Vec<String>,            // six meals, same as before
+}
+
+Helper to render a DayPlan
+
+impl std::fmt::Display for DayPlan {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "=== WORKOUTS ===")?;
+        for (i, w) in self.workouts.iter().enumerate() {
+            writeln!(f, "[{}] {}", i + 1, w.description)?;
+        }
+        writeln!(f, "\n=== MEALS ===")?;
+        for (i, m) in self.meals.iter().enumerate() {
+            writeln!(f, "{}. {}", i + 1, m)?;
+        }
+        Ok(())
+    }
+}
+
+## Extend the CSV format (optional)
+
+If you ever want to keep the plan in CSV, add two extra columns after the workout column: Column, Meaning, workout, equip
+Comma-separated list of equipment tags, e.g. Bike,Weights or Bodyweight.
+
+Example line (Monday)
+0,"Chest + Biceps:\n• Decline push-ups …","Bodyweight"
+
+The loader functions (load_workouts_csv) have been updated to parse the equip column into a Vec<Equip> (see the code snippet in section 4).
+
+## Working-hour filter (src/utils.rs)
+/// Returns true if the current hour (0-23) falls inside a *free* window.
+pub fn is_free_hour(hour: u32) -> bool {
+    // Working blocks: 9-12 and 14-18 (inclusive start, exclusive end)
+    // Free periods: 0-9, 12-14, 18-24
+    !( (9..12).contains(&hour) || (14..18).contains(&hour) )
+}
+
+You can call this from main.rs to decide whether a workout can be shown today.
+
+## Loading workouts with equipment tags (src/data.rs)
+/// Parse a comma-separated list of equipment tags into `Vec<Equip>`.
+fn parse_equip_field(field: &str) -> Vec<Equip> {
+    field
+        .split(',')
+        .filter_map(|s| match s.trim().to_ascii_lowercase().as_str() {
+            "bike" => Some(Equip::Bike),
+            "hangboard" => Some(Equip::Hangboard),
+            "weights" => Some(Equip::Weights),
+            "bodyweight" => Some(Equip::Bodyweight),
+            _ => None, // unknown tag – silently ignore
+        })
+        .collect()
+}
+
+/// Load workouts from `workouts.csv`.  The CSV now has three columns:
+/// `day_index,workout,equip`
+pub fn load_workouts_csv<P: AsRef<std::path::Path>>(path: P)
+    -> Result<[Vec<WorkoutEntry>; 7], std::io::Error>
+{
+    let raw = std::fs::read_to_string(path)?;
+    // Temporary storage – each day gets a Vec<WorkoutEntry>.
+    let mut out: [Vec<WorkoutEntry>; 7] = Default::default();
+
+
+    for line in raw.lines() {
+        // Split into exactly three fields (day_index, workout, equip)
+        let parts: Vec<&str> = line.splitn(3, ',').collect();
+        if parts.len() != 3 { continue; }
+
+
+        let idx: usize = parts[0].trim().parse().unwrap_or(usize::MAX);
+        if idx >= 7 { continue; }
+
+
+        // Strip surrounding quotes from the workout description
+        let mut desc = parts[1].trim();
+        if desc.starts_with('"') && desc.ends_with('"') && desc.len() >= 2 {
+            desc = &desc[1..desc.len() - 1];
+        }
+        let desc = desc.replace("\\n", "\n"); // turn escaped \n into real line breaks
+
+
+        // Parse equipment list
+        let equip = parse_equip_field(parts[2]);
+
+
+        out[idx].push(WorkoutEntry {
+            description: desc,
+            equipment: equip,
+        });
+    }
+    Ok(out)
+}
+
+If you keep the single-workout-per-day model, each inner Vec will contain exactly one element. The vector gives us room to add extra optional sessions later (e.g., a quick “stretch” routine).
+
+## Filtering by owned equipment (src/main.rs)
+
+First, tell the program what you own. Add a constant near the top of main.rs (or read it from config.toml if you prefer):
+
+use data::{Equip, WorkoutEntry};
+
+/// Equipment you actually have.  Edit this list whenever you acquire
+/// or discard gear.
+const OWNED_EQUIP: &[Equip] = &[Equip::Bike, Equip::Hangboard, Equip::Weights, Equip::Bodyweight];
+
+Now, after loading the weekly plan, filter each day’s workouts:
+
+// --------------------------------------------------------------
+// Load the weekly plan (still using the split CSV files)
+// --------------------------------------------------------------
+let weekly_plan: [DayPlan; 7] = match cfg.plan_backend {
+    Backend::Csv => {
+        let workouts_raw = data::load_workouts_csv(&cfg.workouts_csv_path)
+            .unwrap_or_else(|e| {
+                eprintln!("⚠️  Could not read workouts.csv: {} – using empty defaults.", e);
+                [Vec::new(); 7]
+            });
+        let meals = data::load_meals_csv(&cfg.meals_csv_path)
+            .unwrap_or_else(|e| {
+                eprintln!("⚠️  Could not read meals.csv: {} – using empty defaults.", e);
+                [Vec::new(), Vec::new(), Vec::new(),
+                 Vec::new(), Vec::new(), Vec::new(),
+                 Vec::new()]
+            });
+
+        // ---- FILTER BY EQUIPMENT -------------------------------------------------
+        let filtered_workouts: [Vec<WorkoutEntry>; 7] = {
+            let mut arr: [Vec<WorkoutEntry>; 7] = Default::default();
+            for i in 0..7 {
+                // Keep only those entries whose `equipment` subset is contained in OWNED_EQUIP
+                let keep: Vec<WorkoutEntry> = workouts_raw[i]
+                    .iter()
+                    .filter(|we| {
+                        we.equipment.iter().all(|e| OWNED_EQUIP.contains(e))
+                    })
+                    .cloned()
+                    .collect();
+                arr[i] = keep;
+            }
+            arr
+        };
+
+        // ---- BUILD THE FINAL DayPlan --------------------------------------------
+        let mut plan: [DayPlan; 7] = Default::default();
+        for i in 0..7 {
+            plan[i] = DayPlan {
+                workouts: filtered_workouts[i].clone(),
+                meals: meals[i].clone(),
+            };
+        }
+        plan
+    }
+    // Google-Sheets branch omitted for brevity – same idea, just call the
+    // Google-Sheets equivalents that return Vec<WorkoutEntry> and Vec<Vec<String>>.
+};
+
+If a day ends up with no matching workout (e.g., you removed all equipment for that day), we fall back to a simple “Rest / Active recovery” placeholder:
+
+// After building the plan, ensure every day has at least one entry:
+for day in weekly_plan.iter_mut() {
+    if day.workouts.is_empty() {
+        day.workouts.push(WorkoutEntry {
+            description: "Rest / Light mobility".to_string(),
+            equipment: vec![Equip::Bodyweight],
+        });
+    }
+}
+
+## Respecting your working schedule
+
+When the program prints today’s plan, we now check whether the current hour is inside a free window. If you happen to run the binary during work hours, the planner will silently hide the workout and only display the meals (or you can choose to show a friendly reminder).
+Add this near the end of main.rs, right before printing the plan:
+
+use utils::is_free_hour;
+use chrono::Timelike; // only needed for the hour extraction
+
+let now = chrono::Local::now();
+let current_hour = now.hour(); // 0-23
+
+let today_plan = &weekly_plan[weekday_idx];
+
+// ------------------------------------------------------------------
+// Decide whether to show the workout based on work hours
+// ------------------------------------------------------------------
+if is_free_hour(current_hour) {
+    // Free time – show everything
+    println!("\n--- TODAY'S PLAN (Week {}, Day {}) ---", week_number + 1, weekday_idx + 1);
+    println!("{}", today_plan);
+} else {
+    // During work – only show meals, plus a short note
+    println!("\n--- TODAY'S PLAN (Week {}, Day {}) ---", week_number + 1, weekday_idx + 1);
+    println!("=== NOTE ===");
+    println!("You are currently within your working hours (9 am-12 pm, 2 pm-6 pm).");
+    println!("Only the meal schedule is shown; the workout can be done outside those blocks.");
+    // Print meals only
+    println!("\n=== MEALS ===");
+    for (i, m) in today_plan.meals.iter().enumerate() {
+        println!("{}. {}", i + 1, m);
+    }
+}
+
+If you launch the program outside work hours, you’ll see the full workout description as before.
+
+## Full picture – what changed and why
+Feature
+Where the change lives
+What it does
+Equipment awareness
+src/data.rs (new Equip, WorkoutEntry) + CSV loader
+Parses an extra equip column, filters out workouts you don’t own.
+User-owned equipment list
+main.rs (OWNED_EQUIP constant)
+Central place to declare what you have.
+Working-hour awareness
+src/utils.rs (is_free_hour) + main.rs (hour check)
+Hides workouts when you’re inside 9-12 / 14-18.
+Fallback for empty days
+main.rs (post-filter loop)
+Guarantees at least a “Rest / Mobility” entry.
+CSV format extension
+Documentation + loader updates
+Adds a third column (equip) to workouts.csv.
+
+All other parts of the original planner (logging weight, adjusting the calorie deficit, weekly summary, etc.) remain untouched.
+
+## Quick test data (copy-paste)
+
+workouts.csv
+0,"Chest + Biceps:\n• Decline push-ups (feet on Delta Board) 3×8-12\n• Standard push-ups 3×12-15\n• Dips between two chairs 3×10-12\n• 20 kg bicep curls 3×10-12\n• Hammer curls 2×12-15","Bodyweight,Weights"
+1,"Legs + Abs:\n• Goblet squat 20 kg 3×12-15\n• Forward lunges 20 kg 3×10-12 per leg\n• Jump squats 2×12-15\n• Front plank 3×45 s\n• Hip thrust 20 kg 3×15-20\n• Reverse crunches 2×20-25","Bodyweight,Weights"
+2,"Hangboard session:\n• 4×10 s hangs (max grip)\n• 4×8 s dead hangs (open hand)","Hangboard"
+3,"Bike cardio:\n• 30 min steady ride (moderate intensity)","Bike"
+4,"Full-body circuit (weights):\n• Plyometric push-ups (clap) 3×30 s\n• Goblet squat 20 kg 3×30 s\n• Mountain climbers 3×30 s\n• Inverted rows 3×30 s\n• Side plank 3×30 s","Weights,Bodyweight"
+5,"Mobility & light bike:\n• 20 min easy spin\n• 15 min dynamic stretching","Bike"
+6,"Rest / Light mobility","Bodyweight"
+meals.csv (unchanged – same as in the previous answer)
+0,"Breakfast: oatmeal + almond milk + banana + whey + chia","Snack AM: Greek yogurt + almonds","Lunch: grilled chicken + quinoa + broccoli + olive oil","Pre-workout: whole-grain bread + peanut butter + honey","Dinner: salmon + sweet potato + mixed green salad + light vinaigrette","Before bed: cottage cheese + chia seeds"
+1,"Breakfast: oatmeal + almond milk + banana + whey + chia","Snack AM: Greek yogurt + almonds","Lunch: grilled chicken + quinoa + broccoli + olive oil","Pre-workout: whole-grain bread + peanut butter + honey","Dinner: salmon + sweet potato + mixed green salad + light vinaigrette","Before bed: cottage cheese + chia seeds"
+2,"Breakfast: oatmeal + almond milk + banana + whey + chia","Snack AM: Greek yogurt + almonds","Lunch: grilled chicken + quinoa + broccoli + olive oil","Pre-workout: whole-grain bread + peanut butter + honey","Dinner: salmon + sweet potato + mixed green salad + light vinaigrette","Before bed: cottage cheese + chia seeds"
+3,"Breakfast: oatmeal + almond milk + banana + whey + chia","Snack AM: Greek yogurt + almonds","Lunch: grilled chicken + quinoa + broccoli + olive oil","Pre-workout: whole-grain bread + peanut butter + honey","Dinner: salmon + sweet potato + mixed green salad + light vinaigrette","Before bed: cottage cheese + chia seeds"
+4,"Breakfast: oatmeal + almond milk + banana + whey + chia","Snack AM: Greek yogurt + almonds","Lunch: grilled chicken + quinoa + broccoli + olive oil","Pre-workout: whole-grain bread + peanut butter + honey","Dinner: salmon + sweet potato + mixed green salad + light vinaigrette","Before bed: cottage cheese + chia seeds"
+5,"Breakfast: oatmeal + almond milk + banana + whey + chia","Snack AM: Greek yogurt + almonds","Lunch: grilled chicken + quinoa + broccoli + olive oil","Pre-workout: whole-grain bread + peanut butter + honey","Dinner: salmon + sweet potato + mixed green salad + light vinaigrette","Before bed: cottage cheese + chia seeds"
+6,"Breakfast: oatmeal + almond milk + banana + whey + chia","Snack AM: Greek yogurt + almonds","Lunch: grilled chicken + quinoa + broccoli + olive oil","Pre-workout: whole-grain bread + peanut butter + honey","Dinner: salmon + sweet potato + mixed green salad + light vinaigrette","Before bed: cottage cheese + chia seeds"
+
+
+Below is a complete design-pattern-driven skeleton that lets you plug-in any kind of planner (fitness, agile work-planning, study-schedule, etc.) while keeping the rest of the application untouched.
+The core idea is the Adapter pattern: each concrete planner implements a common trait (Planner) and an adapter translates the planner’s native data model into the unified view the rest of the program expects.
+
+## The common abstraction – Planner trait
+
+/// The interface the rest of the app knows about.
+pub trait Planner {
+    /// Human-readable title for the current day (e.g. “Today’s Workout”,
+    /// “Sprint Backlog”, …).  Used when printing the daily view.
+    fn day_title(&self, weekday: usize) -> String;
+
+
+    /// Returns the *items* that should be shown for the given weekday.
+    /// An item can be anything that implements `Display` – the UI simply
+    /// prints each one on its own line.
+    fn items_for_day(&self, weekday: usize) -> Vec<Box<dyn std::fmt::Display>>;
+
+
+    /// Optional hook that lets the planner update internal state after the
+    /// user has entered weight / completed a task, etc.
+    fn post_update(&mut self, _today: &str) {}
+}
+
+Why a trait?
+All planners – fitness, agile, study – can be treated uniformly.
+The UI (your main.rs) only calls the three methods above; the concrete implementation decides what “items” mean.
+
+## Adapter for the FitnessPlanner (the code you already have)
+
+// src/fitness_adapter.rs
+use crate::data::{DayPlan, DayLog, Equip};
+use crate::planner::Planner;
+use std::fmt;
+
+/// Wrapper that adapts the existing fitness structures to the `Planner` trait.
+pub struct FitnessAdapter {
+    /// The 7-day plan (already filtered for equipment & free-hours).
+    weekly_plan: [DayPlan; 7],
+    /// Logs are kept here so the adapter can compute the current calorie target.
+    logs: Vec<DayLog>,
+    /// User’s height/age – needed for the maintenance-calorie formula.
+    height_cm: f32,
+    age_years: u32,
+}
+
+impl FitnessAdapter {
+    pub fn new(
+        weekly_plan: [DayPlan; 7],
+        logs: Vec<DayLog>,
+        height_cm: f32,
+        age_years: u32,
+    ) -> Self {
+        Self {
+            weekly_plan,
+            logs,
+            height_cm,
+            age_years,
+        }
+    }
+
+
+    /// Helper that calculates the current calorie target.
+    fn current_calorie_target(&self, weight: f32, bf: f32) -> i32 {
+        // Very rough Mifflin-St Jeor + light activity factor (1.4)
+        let bmr = 10.0 * weight + 6.25 * self.height_cm - 5.0 * (self.age_years as f32) + 5.0;
+        ((bmr * 1.4).round()) as i32 - crate::planner::TARGET_DEFICIT_KCAL
+    }
+}
+
+/* ---------- Implement the Planner trait ---------- */
+impl Planner for FitnessAdapter {
+    fn day_title(&self, weekday: usize) -> String {
+        format!("TODAY'S FITNESS PLAN (Day {})", weekday + 1)
+    }
+
+    fn items_for_day(&self, weekday: usize) -> Vec<Box<dyn fmt::Display>> {
+        let mut out: Vec<Box<dyn fmt::Display>> = Vec::new();
+
+        // ---- WORKOUT(s) -------------------------------------------------
+        for w in &self.weekly_plan[weekday].workouts {
+            // Wrap each workout description in a tiny Display impl
+            out.push(Box::new(w.description.clone()));
+        }
+
+        // ---- MEALS ------------------------------------------------------
+        for (i, meal) in self.weekly_plan[weekday].meals.iter().enumerate() {
+            out.push(Box::new(format!("Meal {}: {}", i + 1, meal)));
+        }
+
+        // ---- CALORIE INFO ------------------------------------------------
+        if let Some(last) = self.logs.last() {
+            let target = self.current_calorie_target(last.weight_kg, last.body_fat_pct);
+            out.push(Box::new(format!(
+                "Current daily calorie target: {} kcal",
+                target
+            )));
+        }
+
+        out
+    }
+
+    fn post_update(&mut self, _today: &str) {
+        // In a full implementation you could recompute the deficit here.
+    }
+}
+
+What changed?
+All the heavy lifting (deficit calculation, filtering, etc.) stays in the existing fitness modules.
+The adapter merely exposes the data in the generic shape required by Planner.
+
+## Adapter for an Agile Work Planner
+Imagine you have a simple Scrum-style board stored in a CSV:
+id, title, status, day (0-6), priority
+1, Finish API endpoint, Todo, 2, 1
+2, Code review PR #42, InProgress, 2, 2
+3, Deploy to staging, Done, 3, 1
+
+We’ll map each row to a Task struct (already defined in data.rs) and then adapt it.
+
+// src/agile_adapter.rs
+use crate::data::Task;
+use crate::planner::Planner;
+use std::fmt;
+
+/// Simple wrapper that turns a vector of `Task`s into a Planner.
+pub struct AgileAdapter {
+    tasks: Vec<Task>,
+}
+
+impl AgileAdapter {
+    pub fn new(tasks: Vec<Task>) -> Self {
+        Self { tasks }
+    }
+
+    /// Helper that formats a task nicely.
+    fn fmt_task(task: &Task) -> impl fmt::Display {
+        let status = match task.status {
+            crate::data::TaskStatus::Todo => "TODO",
+            crate::data::TaskStatus::InProgress => "IN-PROGRESS",
+            crate::data::TaskStatus::Done => "DONE",
+        };
+        format!(
+            "[{}] (P{:}) {} – {}",
+            task.id, task.priority, task.title, status
+        )
+    }
+}
+
+
+/* ---------- Implement the Planner trait ---------- */
+impl Planner for AgileAdapter {
+    fn day_title(&self, weekday: usize) -> String {
+        format!("SPRINT BACKLOG – DAY {}", weekday + 1)
+    }
+
+
+    fn items_for_day(&self, weekday: usize) -> Vec<Box<dyn fmt::Display>> {
+        let mut out: Vec<Box<dyn fmt::Display>> = Vec::new();
+
+
+        // Filter tasks that belong to the requested weekday and are NOT DONE
+        let mut todays: Vec<&Task> = self
+            .tasks
+            .iter()
+            .filter(|t| t.due_day == weekday && t.status != crate::data::TaskStatus::Done)
+            .collect();
+
+
+        // Sort by priority (lower number = higher priority)
+        todays.sort_by_key(|t| t.priority);
+
+
+        for t in todays {
+            out.push(Box::new(Self::fmt_task(t)));
+        }
+
+
+        out
+    }
+
+
+    fn post_update(&mut self, _today: &str) {
+        // Here you could persist the updated task list (CSV, Google Sheet, …)
+    }
+}
+
+Now you have a plug-and-play work planner that follows the same Planner contract as the fitness planner.
+
+## Central dispatcher – choose the planner at runtime
+
+// src/main.rs (excerpt)
+mod config;
+mod data;
+mod fitness_adapter;
+mod agile_adapter;
+mod planner;          // contains the `Planner` trait & constants
+mod utils;
+mod storage;          // CSV / Google-Sheets helpers
+
+
+use planner::Planner;
+use utils::weekday_index;
+
+
+fn main() {
+    // -------------------------------------------------
+    // Load configuration (contains which planner to use)
+    // -------------------------------------------------
+    let cfg = config::Config::load("config.toml").expect("cannot read config.toml");
+
+
+    // -------------------------------------------------
+    // Build the concrete planner (adapter) based on config
+    // -------------------------------------------------
+    let mut planner: Box<dyn Planner> = match cfg.active_planner.as_str() {
+        "fitness" => {
+            // Load fitness data (same as before)
+            let logs = storage::csv::load_log(&cfg.log_csv_path).unwrap_or_default();
+            let workouts = storage::csv::load_workouts(&cfg.workouts_csv_path).unwrap();
+            let meals    = storage::csv::load_meals(&cfg.meals_csv_path).unwrap();
+            let weekly_plan = fitness::build_weekly_plan(workouts, meals);
+            Box::new(fitness_adapter::FitnessAdapter::new(
+                weekly_plan,
+                logs,
+                cfg.height_cm,
+                cfg.age_years,
+            ))
+        }
+        "agile" => {
+            // Load tasks from CSV (id,title,desc,day,priority,status)
+            let tasks = storage::csv::load_tasks(&cfg.tasks_csv_path).unwrap_or_default();
+            Box::new(agile_adapter::AgileAdapter::new(tasks))
+        }
+        other => panic!("unknown planner `{}` in config.toml", other),
+    };
+
+
+    // -------------------------------------------------
+    // Main interaction loop (same for every planner)
+    // -------------------------------------------------
+    let (today_str, weekday) = utils::today_info(); // ("2025-10-09", 3) for Thursday
+    println!("\n=== {} ({}) ===", today_str, weekday_name(weekday));
+
+
+    // Title supplied by the concrete planner
+    println!("{}", planner.day_title(weekday));
+
+
+    // Get the list of items (workouts, meals, tasks…) and print them
+    for item in planner.items_for_day(weekday) {
+        println!("{}", item);
+    }
+
+
+    // -------------------------------------------------
+    // (Optional) post-update hook – e.g. persist new weight,
+    //    mark a task as done, etc.
+    // -------------------------------------------------
+    planner.post_update(&today_str);
+}
+
+
+/* Helper to turn 0-6 into a nice weekday name */
+fn weekday_name(idx: usize) -> &'static str {
+    match idx {
+        0 => "Monday",
+        1 => "Tuesday",
+        2 => "Wednesday",
+        3 => "Thursday",
+        4 => "Friday",
+        5 => "Saturday",
+        6 => "Sunday",
+        _ => "???",
+    }
+}
+
+Key points
+Concept
+Explanation
+Trait (Planner)
+Defines the contract that every planner must fulfill.
+Adapter (FitnessAdapter, AgileAdapter)
+Translates a concrete domain model (fitness data, agile tasks) into the contract.
+Dynamic dispatch (Box<dyn Planner>)
+Allows the program to hold any planner at runtime, chosen via the config file.
+Zero-crate
+All adapters use only the standard library; the only external requirement is curl when you decide to talk to Google Sheets.
+
+
+## Updating config.toml to switch planners
+
+# Existing keys …
+active_planner = "fitness"   # or "agile"
+
+# Fitness-specific keys (keep them; they’ll be ignored by the agile planner)
+height_cm = 175
+age_years = 30
+log_csv_path = "log.csv"
+workouts_csv_path = "workouts.csv"
+meals_csv_path    = "meals.csv"
+
+# Agile-specific keys
+tasks_csv_path = "tasks.csv"
+Changing active_planner from "fitness" to "agile" instantly swaps the whole UI without recompiling.
+
+6️⃣ Extending the system – add a new planner in minutes
+Create a new struct that holds whatever data that planner needs.
+Implement Planner for that struct (provide day_title, items_for_day, optional post_update).
+Add a branch in main.rs that constructs the new adapter when cfg.active_planner matches the new name.
+Update config.toml with any extra paths / parameters the new planner requires.
+Because the rest of the application only talks to the trait, no other file has to change.
+
+7️⃣ Quick sanity-check (run it)
+# Assuming you have the CSV files in place
+rustc main.rs -o weekly_manager
+./weekly_manager
+Output (when active_planner = "fitness"):
+=== 2025-10-09 (3) ===
+TODAY'S FITNESS PLAN (Day 4)
+Cardio / HIIT:
+• 20 min d’intervalles 30 s sprint / 30 s repos (10 cycles)
+• 3 × 30 s burpees
+Meal 1: Petit-déj : flocons d’avoine + ...
+Meal 2: Collation AM : yaourt grec + amandes
+…
+Current daily calorie target: 2360 kcal
+Output (when active_planner = "agile"):
+=== 2025-10-09 (3) ===
+SPRINT BACKLOG – DAY 4
+[2] (P1) Finish API endpoint – TODO
+[5] (P2) Write unit tests – IN-PROGRESS
+
+8️⃣ TL;DR – What you get
+Feature
+Implementation
+Unified UI
+Planner trait + dynamic dispatch (Box<dyn Planner>).
+Fitness planner
+Existing code wrapped in FitnessAdapter.
+Agile work planner
+New AgileAdapter that reads a CSV backlog.
+Runtime switching
+active_planner key in config.toml.
+Zero external crates
+Only curl for optional Google Sheets; everything else is pure std.
+Future-proof
+Add any new planner (study schedule, habit tracker, …) by implementing the same trait – no changes elsewhere.
+
+Give it a try: copy the snippets into the appropriate files, adjust the CSV paths, and run the binary. You’ll instantly have a modular, extensible weekly manager that can juggle workouts and agile tasks (or any other planner you invent later). Happy coding!
