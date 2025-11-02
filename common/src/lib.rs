@@ -4,6 +4,7 @@
 // See the LICENSE file in the project root for the full license text.
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
+use validator::Validate;
 
 #[allow(clippy::doc_overindented_list_items)]
 /// Represents a task within the system.
@@ -16,30 +17,15 @@ use serde::{Deserialize, Serialize};
 ///    from a database result row.
 #[derive(Serialize, Deserialize, Debug, Clone, sqlx::FromRow)]
 pub struct Task {
-    #[sqlx(rename = "id")]
     pub id: i64,
-
-    #[sqlx(rename = "client_name")]
     pub client_name: String,
-
-    #[sqlx(rename = "description")]
     pub description: String,
-
     // We use NaiveDate because we are only interested in the day,
     // without a timezone.
-    #[sqlx(rename = "task_date")]
     pub task_date: NaiveDate,
-
-    #[sqlx(rename = "client_color")]
     pub client_color: String,
-
-    #[sqlx(rename = "created_at")]
     pub created_at: DateTime<Utc>,
-
-    #[sqlx(rename = "deleted_at")]
     pub deleted_at: Option<DateTime<Utc>>,
-
-    #[sqlx(rename = "priority")]
     pub priority: Option<i32>, // (e.g., 1 = high, lower number = higher priority)
 }
 
@@ -47,13 +33,16 @@ pub struct Task {
 /// It's a good practice to separate database models (`Task`)
 /// from API models (`CreateTaskPayload`), as they may have different fields.
 /// Here, `task_date` is optional.
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Validate)]
 pub struct CreateTaskPayload {
+    #[validate(length(min = 1, max = 100))]
     pub client_name: String,
+    #[validate(length(min = 1, max = 500))]
     pub description: String,
     // The day is optional. If not provided,
     // we'll use the current day on the server-side.
     pub task_date: Option<NaiveDate>,
+    #[serde(default)]
     pub priority: Option<i32>,
 }
 

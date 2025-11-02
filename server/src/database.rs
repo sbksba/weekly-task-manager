@@ -27,23 +27,11 @@ pub async fn establish_connection_pool(database_url: &str) -> Result<SqlitePool>
         .await
         .context("Failed to connect to database")?;
 
-    sqlx::query(
-        r#"
-        CREATE TABLE IF NOT EXISTS tasks (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            client_name TEXT NOT NULL,
-            description TEXT NOT NULL,
-            task_date DATE NOT NULL,
-            client_color TEXT NOT NULL,
-            created_at TIMESTAMP NOT NULL,
-            deleted_at TIMESTAMP WITH TIME ZONE NULL,
-            priority INTEGER NULL
-        );
-        "#,
-    )
-    .execute(&pool)
-    .await
-    .context("Failed to create 'tasks' table")?;
+    // Apply the migrations (table creation and future evolutions).
+    sqlx::migrate!("./migrations")
+        .run(&pool)
+        .await
+        .context("Running migrations failed")?;
 
     info!("'tasks' table is ready.");
 

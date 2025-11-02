@@ -6,6 +6,9 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::Mutex;
+use tokio::task::JoinHandle;
 
 use lazy_static::lazy_static;
 use parking_lot::RwLock;
@@ -16,7 +19,7 @@ const DATA_DIR: &str = "database";
 const CLIENT_COLORS_FILE_NAME: &str = "client_colors.json";
 
 // Struct to hold the client color map
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientColorMap {
     colors: HashMap<String, String>,
     #[serde(skip)] // Don't serialize the palette
@@ -110,6 +113,8 @@ fn save_client_colors(colors_map: &ClientColorMap) -> Result<(), Box<dyn std::er
 
 /// Function to get or assign a unique color to a client name.
 /// It persists the assignment to a file.
+static SAVE_DEBOUNCE: Mutex<Option<JoinHandle<()>>> = Mutex::const_new(None);
+
 #[allow(clippy::uninlined_format_args)]
 pub fn get_or_assign_client_color(client_name: &str) -> String {
     let mut client_colors = CLIENT_COLORS.write(); // Acquire a write lock
@@ -129,10 +134,28 @@ pub fn get_or_assign_client_color(client_name: &str) -> String {
     client_colors.next_color_index =
         (client_colors.next_color_index + 1) % client_colors.palette.len();
 
-    // Save the updated map to the file (error handling inside)
-    if let Err(e) = save_client_colors(&client_colors) {
-        eprintln!("Error saving client colors: {}", e);
-    }
+    // ----------- DEBOUNCE SAVE -----------
+    // We need a copy of the *current* map to write down later.
+    // We cannot clone the guard; instead, we clone the underlying map.
+    let map_snapshot = (*client_colors).clone();
+
+    // Cancel the previous handle, if it exists.
+    tokio::spawn(async move {
+        // We prevent concurrent access to the handle.
+        if let Some(prev) = SAVE_DEBOUNCE.lock().await.take() {
+            prev.abort(); // Stop the preceding writing.
+        }
+
+        // Schedule the writing two seconds later.
+        let handle = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            if let Err(e) = save_client_colors(&map_snapshot) {
+                eprintln!("Error saving client colors: {}", e);
+            }
+        });
+
+        *SAVE_DEBOUNCE.lock().await = Some(handle);
+    });
 
     color_to_assign
 }

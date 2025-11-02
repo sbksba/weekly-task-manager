@@ -12,6 +12,7 @@ use chrono::{Utc, Weekday};
 use common::{CreateTaskPayload, Task};
 use sqlx::SqlitePool;
 use tracing::{debug, error, info};
+use validator::Validate;
 
 /// Handler for listing tasks for the current week.
 pub async fn list_tasks(
@@ -34,12 +35,19 @@ pub async fn create_task(
         payload.client_name
     );
     // Validate the payload : name, description and date
-    if payload.client_name.is_empty() || payload.description.is_empty() {
-        error!("Validation failed: Client name or description is empty.");
-        return Err(AppError::new(
-            StatusCode::BAD_REQUEST,
-            "Client name and description cannot be empty.",
-        ));
+    if let Err(validation_errors) = payload.validate() {
+        // Build a human-readable error message from the validation errors
+        let msg = validation_errors
+            .field_errors()
+            .iter()
+            .map(|(field, errs)| {
+                let reasons: Vec<String> = errs.iter().map(|e| e.code.to_string()).collect();
+                format!("{}: {}", field, reasons.join(", "))
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
+
+        return Err(AppError::new(StatusCode::BAD_REQUEST, &msg));
     }
 
     let today = Utc::now().date_naive();
@@ -199,7 +207,7 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert_eq!(err.code, StatusCode::BAD_REQUEST);
-        assert_eq!(err.message, "Client name and description cannot be empty.");
+        assert_eq!(err.message, "client_name: length");
     }
 
     #[tokio::test]
