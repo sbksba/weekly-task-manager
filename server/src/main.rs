@@ -8,11 +8,8 @@ mod handlers;
 mod routes;
 
 use axum::http::HeaderName;
-use chrono::Utc;
 use std::net::SocketAddr;
-use std::sync::Arc;
-use tokio::sync::Mutex;
-use tokio::time::{self, Duration};
+use tokio_cron_scheduler::{Job, JobScheduler};
 use tower_http::cors::{Any, CorsLayer};
 
 // Define the DB_URL here for the main application's use.
@@ -39,52 +36,36 @@ async fn main() {
         }
     };
 
-    let rollover_pool = db_pool.clone(); // Clone the pool for the rollover task
-    let last_rollover_date = Arc::new(Mutex::new(Utc::now().date_naive())); // Store last date rollover happened
+    // The cron job runs at 00:00 server time and calls the same DB function
+    // that the manual endpoint uses.
+    let rollover_pool = db_pool.clone(); // pool will be moved into the job closure
 
-    tokio::spawn(async move {
-        // Set an interval for checking.
-        // For testing, you might use `Duration::from_secs(60)` for every minute.
-        let mut interval = time::interval(Duration::from_secs(5 * 60)); // Check every 5 minutes
+    // Initialise the scheduler (runs in its own background task)
+    let scheduler = JobScheduler::new()
+        .await
+        .expect("Failed to create cron scheduler");
 
-        // The first tick completes immediately. Skip it to wait for the first interval.
-        interval.tick().await;
-
-        loop {
-            interval.tick().await; // Wait for the next interval tick
-
-            let current_date = Utc::now().date_naive();
-            let mut last_date_guard = last_rollover_date.lock().await;
-
-            if *last_date_guard < current_date {
-                // If the current date is greater than the last date we rolled over for,
-                // it means a new day has started.
-                tracing::info!(
-                    "New day detected: {}, performing task rollover.",
-                    current_date
-                );
-                match database::rollover_tasks_in_db(&rollover_pool).await {
-                    Ok(count) => {
-                        tracing::info!(
-                            "Successfully rolled over {} tasks for {}.",
-                            count,
-                            current_date
-                        );
-                        *last_date_guard = current_date; // Update the last processed date
-                    }
-                    Err(e) => {
-                        tracing::error!("Error during automatic task rollover: {:?}", e);
-                    }
-                }
-            } else {
-                tracing::debug!(
-                    "No new day yet. Current date: {}. Last rollover date: {}.",
-                    current_date,
-                    *last_date_guard
-                );
+    // Cron expression "0 0 * * * *" → every day at 00:00 (seconds, minutes, hours, day, month, weekday)
+    let job = Job::new_async("0 0 * * * *", move |_uuid, _l| {
+        let pool = rollover_pool.clone();
+        // The closure must return a **boxed** future.
+        Box::pin(async move {
+            match database::rollover_tasks_in_db(&pool).await {
+                Ok(count) => tracing::info!("Rolled over {} tasks at midnight.", count),
+                Err(e) => tracing::error!("Rollover failed: {:?}", e),
             }
-        }
-    });
+        })
+    })
+    .expect("Failed to create cron job");
+
+    scheduler
+        .add(job)
+        .await
+        .expect("Failed to add cron job to scheduler");
+    scheduler
+        .start()
+        .await
+        .expect("Failed to start cron scheduler");
 
     let app_routes = routes::create_router(db_pool);
 

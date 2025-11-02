@@ -7,3 +7,4 @@ edition = "2024"
 serde = { workspace = true }
 chrono = { workspace = true }
 sqlx = { workspace = true }
+validator = { workspace = true }
